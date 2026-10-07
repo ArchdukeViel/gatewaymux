@@ -1,0 +1,26 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1' # Weekly on Mondays
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret & Pattern Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Scan for forbidden patterns
+        run: |
+          echo "Scanning repository for accidental credential leaks..."
+          # Exclude .git and verify no real API keys exist
+          ! grep -rnE "ghp_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{48}" . --exclude-dir=.git

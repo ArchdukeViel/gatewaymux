@@ -1,0 +1,55 @@
+name: Provider Request / Integration Proposal
+description: Propose a new upstream LLM/model provider integration
+labels: ["provider-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to propose a new upstream inference provider. All external provider additions enter the repository as `EXPERIMENTAL`.
+  - type: input
+    id: provider_name
+    attributes:
+      label: Provider Name & Service
+      description: Name of the provider (e.g. Together AI, Fireworks, Groq, Mistral).
+    validations:
+      required: true
+  - type: input
+    id: docs_url
+    attributes:
+      label: Provider API Documentation URL
+      description: Link to official API documentation.
+    validations:
+      required: true
+  - type: checkboxes
+    id: supported_operations
+    attributes:
+      label: Supported Operation Families
+      description: Select the operation families supported by this provider.
+      options:
+        - label: Text Chat Completions (OpenAI compatible)
+        - label: OpenAI Responses API
+        - label: Anthropic Messages API
+        - label: Embeddings
+        - label: Image Generation
+        - label: Speech Synthesis / Audio
+        - label: Transcription
+        - label: Video Operations
+        - label: Web Search / Fetch
+  - type: dropdown
+    id: auth_method
+    attributes:
+      label: Authentication Method
+      options:
+        - Bearer API Key
+        - OAuth 2.0 PKCE / Device Flow
+        - Static Custom Headers
+        - None (Local / Open)
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Value Proposition & Use Case
+      description: Explain why this provider benefits GatewayMux users.
+    validations:
+      required: true

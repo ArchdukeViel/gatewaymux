@@ -1,0 +1,49 @@
+name: Owner Approval Gate
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  owner-approval:
+    name: Owner Approval Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Owner Approval
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          echo "PR Author: $PR_AUTHOR"
+          if [ "$PR_AUTHOR" = "ArchdukeViel" ]; then
+            echo "Author is repository owner (@ArchdukeViel). Approval gate passed automatically."
+            exit 0
+          fi
+
+          echo "External contribution detected. Checking for owner approval from @ArchdukeViel..."
+          REVIEWS=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "ArchdukeViel") | .state')
+
+          APPROVED=false
+          for STATE in $REVIEWS; do
+            if [ "$STATE" = "APPROVED" ]; then
+              APPROVED=true
+            elif [ "$STATE" = "CHANGES_REQUESTED" ] || [ "$STATE" = "DISMISSED" ]; then
+              APPROVED=false
+            fi
+          done
+
+          if [ "$APPROVED" = "true" ]; then
+            echo "Found valid APPROVED review from @ArchdukeViel. Approval gate passed."
+            exit 0
+          else
+            echo "::error::Pull requests from external contributors require explicit approval from @ArchdukeViel."
+            exit 1
+          fi

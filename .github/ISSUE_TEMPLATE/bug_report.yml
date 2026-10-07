@@ -1,0 +1,59 @@
+name: Bug Report
+description: Report an unexpected error, crash, or malfunction in GatewayMux
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Please ensure you do not include any secrets, API keys, or private data in this report.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Start GatewayMux with configuration '...'
+        2. Send client request '...'
+        3. Observe error code '...'
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened according to the PRD.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Sanitized Configuration & Logs
+      description: Provide relevant sanitized configuration excerpts or logs (ensure all secrets are masked).
+      render: toml
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: GatewayMux Version / Commit
+      description: Output of `gatewaymux --version` or Git commit SHA.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows 11
+        - Windows 10
+        - Windows Server
+        - Other
+    validations:
+      required: true

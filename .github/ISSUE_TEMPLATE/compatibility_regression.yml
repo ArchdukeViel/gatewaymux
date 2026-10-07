@@ -1,0 +1,37 @@
+name: Client Compatibility Regression
+description: Report an incompatibility or regression with an AI client SDK or agent framework
+labels: ["compatibility", "needs-fixture"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GatewayMux aims to maintain seamless drop-in compatibility with OpenAI and Anthropic client SDKs.
+  - type: input
+    id: client_framework
+    attributes:
+      label: AI Client / Agent Tool
+      description: E.g., OpenAI Python SDK v1.50, Claude Code, Cursor, Cline, Codex.
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: Invoked Endpoint
+      description: E.g., `/v1/chat/completions`, `/v1/responses`, `/v1/messages`.
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Incompatibility Symptom
+      description: What client error or unexpected behavior occurs?
+    validations:
+      required: true
+  - type: textarea
+    id: payload_sample
+    attributes:
+      label: Sanitized Request Payload & Error
+      description: Sanitized excerpt of the request payload sent by the client.
+      render: json
+    validations:
+      required: true
