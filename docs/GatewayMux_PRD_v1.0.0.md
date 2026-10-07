@@ -3,7 +3,7 @@
 > **Product**: GatewayMux  
 > **Version**: `1.0.0`  
 > **Status**: Greenfield Architecture Baseline / Living Product Specification  
-> **Document Revision**: `Rev 5`  
+> **Document Revision**: `Rev 6`  
 > **Date**: 2026-10-07  
 > **Target Repository**: `ArchdukeViel/gatewaymux`  
 > **License**: MIT  
@@ -4567,6 +4567,8 @@ Dashboard MUST clearly show which guarantees are active. Configuration sync on a
 
 GatewayMux v1 ships an optional small **GatewayMux Sync Server** implementing S3 capabilities. The sync protocol remains provider-neutral so future storage/services can implement the same interface.
 
+The reference server is a **Rust binary/service** (`gatewaymux-sync-server`, workspace member at `sync-server/`) and is NOT a Node.js/TypeScript application. It consumes shared GatewayMux contracts only: it depends on `gatewaymux-core` and `gatewaymux-sync`, and MUST NOT depend on the gateway runtime crates (`gatewaymux-server`, `gatewaymux-providers`, `gatewaymux-routing`) or Core sync-specific implementation details.
+
 The reference server SHOULD be independently deployable and MUST NOT be required for localhost-only GatewayMux use.
 
 ## 22.4 Sync Backend Contract
@@ -5087,7 +5089,7 @@ The launcher locates the bundled executable, forwards argv/stdin/stdout/stderr, 
 
 ## 25.13 Sync Server Distribution
 
-The optional GatewayMux Sync Server is versioned separately or as a coordinated artifact set but follows compatible protocol-version negotiation. Core MUST tolerate compatible server patch/minor versions and reject unsupported sync protocol versions safely.
+The optional GatewayMux Sync Server (the Rust `gatewaymux-sync-server` binary) is versioned as part of the coordinated GatewayMux semantic version and follows compatible protocol-version negotiation. Core MUST tolerate compatible server patch/minor versions and reject unsupported sync protocol versions safely. The Sync Server is distributed from the same release artifact set and shares the unified product version; the sync wire protocol revision remains independently versioned.
 
 # 26. Testing and CI/CD
 
@@ -5107,6 +5109,8 @@ Every PR SHOULD run:
 - routing/quality/trust/cost-policy tests;
 - concurrency/singleflight/cancellation tests;
 - security lint/audit tooling as practical.
+
+In addition, every PR MUST pass the required repository governance checks: repository hygiene and architecture boundary verification, deterministic generated-file reproducibility (`cargo xtask generate --check`), Compatibility Corpus sanitization, Rust and npm workspace validation, coordinated release version alignment, and change-risk classification verification (`cargo xtask risk-check`, which rejects missing or under-declared risk classes and applies the trusted Dependabot path-derived exemption), plus the metadata-only Owner Approval Gate for external/bot PRs.
 
 CI MUST not wait until release tags.
 
@@ -5409,7 +5413,7 @@ Gemini/Vertex-specific schema handling is isolated to its dialect profiles; swit
 
 ## 27.11 Cloud Sync
 
-Reference Sync Server passes S3 multi-device tests; configuration conflicts never silently overwrite; local-only secrets remain local; optional vault is E2E encrypted; distributed quota/rate coordination is not claimed when backend capability is insufficient.
+The Rust reference Sync Server passes S3 multi-device tests; configuration conflicts never silently overwrite; local-only secrets remain local; optional vault is E2E encrypted; distributed quota/rate coordination is not claimed when backend capability is insufficient.
 
 ## 27.12 npm
 
@@ -5435,7 +5439,7 @@ When resolving requirements, architectural decisions, implementation choices, or
 
 ## 28.2 Workspace Boundaries and Directional Dependency Policy
 
-The GatewayMux repository is organized as a multi-crate Rust workspace complemented by a behavior-free npm workspace. Architectural layers MUST enforce strict directional dependency boundaries:
+The GatewayMux repository is organized as a multi-crate Rust workspace, including the Rust reference Sync Server (`gatewaymux-sync-server` at `sync-server/`), complemented by behavior-free npm workspaces for the Dashboard and npm distribution packaging. Architectural layers MUST enforce strict directional dependency boundaries:
 
 ```mermaid
 flowchart TD
@@ -5455,28 +5459,30 @@ flowchart TD
     BRID --> CORE
     SYNC --> CORE
 
-    ROUT --> PROV
-    ROUT --> PROT
     ROUT --> CORE
 
     PROV --> PROT
     PROV --> CORE
 
     PROT --> CORE
+
+    SYNCS[gatewaymux-sync-server] --> SYNC
+    SYNCS --> CORE
 ```
 
 Normative boundaries:
 1. **`gatewaymux-core`**: Defines canonical operation representations, quality contracts, trust boundaries, credential abstractions, and domain models. Core MUST be strictly OS-neutral and provider-agnostic. Core MUST NOT depend on any internal workspace crate, Win32 APIs, or provider implementations.
 2. **`gatewaymux-protocols`**: Handles wire-protocol serialization, deserialization, schema dialect translation, and transport compatibility profiles. Depends only on `gatewaymux-core`.
 3. **`gatewaymux-providers`**: Implements upstream provider adapters and credential protocols. Depends on `gatewaymux-core` and `gatewaymux-protocols`. Provider implementations MUST NOT depend on the control-plane dashboard or HTTP server layers.
-4. **`gatewaymux-routing`**: Encapsulates combo fallback chains, quota enforcement, model resolution, adaptive deployment selection, retry budgets, and attempt ledgers. Depends on `gatewaymux-core`, `gatewaymux-protocols`, and `gatewaymux-providers`.
+4. **`gatewaymux-routing`**: Encapsulates combo fallback chains, quota enforcement, model resolution, adaptive deployment selection, retry budgets, and attempt ledgers. Routing operates on provider-neutral contracts and candidate data. It depends only on `gatewaymux-core` and MUST NOT depend on `gatewaymux-providers` or any concrete provider adapter implementation; provider-name branching for provider-specific behavior is prohibited in the routing layer (the composition/runtime layer wires selected routes to concrete provider execution). Routing MAY adopt protocol-neutral contracts from `gatewaymux-protocols` only through a future accepted governance change that records the concrete requirement.
 5. **`gatewaymux-sync`**: Cloud State Sync protocol client, distributed quota coordination, and state reconciliation. Depends on `gatewaymux-core`.
 6. **`gatewaymux-codex-bridge`**: Windows-specific Codex subagent interceptor. MUST NOT depend directly on provider implementations (`gatewaymux-providers`); all intercepted subagent traffic MUST dispatch through GatewayMux Core routing contracts.
 7. **`gatewaymux-server`**: Implements separate HTTP listeners for data plane and control plane. Depends on `gatewaymux-core`, `gatewaymux-protocols`, `gatewaymux-routing`, and `gatewaymux-providers`.
-8. **`gatewaymux-cli`**: Command-line administrative interface and daemon controls.
-9. **`gatewaymux-app`**: Native application executable assembling server, CLI, Codex Bridge, and optional tray support.
-10. **`crates/xtask`**: Independent developer task runner and enforcement tool; isolated from runtime product binaries.
-11. **`dashboard` / Control-Plane UI**: Consumes defined control-plane REST/WebSocket contracts; MUST NOT reach into Rust crate internals.
+8. **`gatewaymux-sync-server`**: The Rust reference Sync Server (`sync-server/`). Depends only on `gatewaymux-core` and `gatewaymux-sync`; MUST NOT depend on the gateway runtime crates (`gatewaymux-server`, `gatewaymux-providers`, `gatewaymux-routing`).
+9. **`gatewaymux-cli`**: Command-line administrative interface and daemon controls.
+10. **`gatewaymux-app`**: Native application executable assembling server, CLI, Codex Bridge, and optional tray support.
+11. **`crates/xtask`**: Independent developer task runner and enforcement tool; isolated from runtime product binaries.
+12. **`dashboard` / Control-Plane UI**: Consumes defined control-plane REST/WebSocket contracts; MUST NOT reach into Rust crate internals.
 
 Directional enforcement is mechanically verified on every commit and PR by `cargo xtask architecture-check`.
 
@@ -5503,9 +5509,11 @@ All code modifications are categorized into five risk classes determining verifi
 | **R1** | Isolated implementation (unit test additions, internal leaf helpers). | `crates/gatewaymux-cli/**`, `packaging/**`, `tests/**`, `scripts/**` | Unit tests pass, workspace compilation, lint clean. |
 | **R2** | Provider & protocol adapters (model profiles, dialect mappings, transport profiles). | `crates/gatewaymux-providers/**`, `crates/gatewaymux-protocols/**`, `profiles/**`, `compat/**` | Conformance tests, compatibility corpus check, protocol serialization round-trip tests. |
 | **R3** | Core routing, public API, persistence, configuration. | `crates/gatewaymux-routing/**`, `crates/gatewaymux-server/**`, `crates/gatewaymux-core/**`, `config/**` | Integration tests, combo fallback simulation, migration idempotent validation. |
-| **R4** | Critical security, authentication, secrets, cloud sync, Codex interception. | `crates/gatewaymux-codex-bridge/**`, `crates/gatewaymux-sync/**`, `docs/security/**`, secret management | Security review, end-to-end sync verification, isolation proof, multi-device safety validation. |
+| **R4** | Critical security, authentication, secrets, cloud sync, Codex interception, the reference Sync Server, and the CI workflow security / software-supply-chain boundary. | `crates/gatewaymux-codex-bridge/**`, `crates/gatewaymux-sync/**`, `sync-server/**`, `.github/workflows/**`, `docs/security/**`, secret management | Security review, end-to-end sync verification, isolation proof, multi-device safety validation. |
 
-Every pull request MUST declare its risk class in the PR template. CI automatically calculates the path-derived minimum risk class from modified files. Contributors MAY raise the declared risk class, but CI MUST reject any PR whose declared risk is lower than the path-derived minimum.
+Every human- or agent-authored pull request MUST declare its risk class in the PR template; a missing declaration or a declaration lower than the path-derived minimum is rejected by CI. Contributors MAY raise the declared risk class, but CI MUST reject any PR whose declared risk is lower than the path-derived minimum. All `.github/workflows/**` modifications carry a minimum risk class of R4 because CI workflows are part of the repository security and software-supply-chain boundary.
+
+**Trusted Dependabot exception**: Pull requests authored by GitHub Dependabot (verified from CI event metadata, never from PR body text) are exempt from manually declaring a risk class; their governing risk class is derived automatically from the changed paths and MUST be derivable from a non-empty change set. This exemption applies specifically to the trusted Dependabot identity and is not a generic bot exemption.
 
 ## 28.5 Provider Lifecycle & Promotion Policy
 
@@ -5532,7 +5540,7 @@ EXPERIMENTAL  ──[ Conformance & Checklist ]──►  FIRST_CLASS  ──►
 
 ## 28.6 Coordinated Release Versioning & Release Manifest
 
-1. **Unified Product Semantic Version**: The native executable (`gatewaymux-app`), CLI (`gatewaymux-cli`), npm distribution wrapper (`gatewaymux`), embedded Dashboard (`@gatewaymux/dashboard`), Sync Server (`@gatewaymux/sync-server`), and Windows installer share a single, unified Semantic Version (`MAJOR.MINOR.PATCH`).
+1. **Unified Product Semantic Version**: The native executable (`gatewaymux-app`), CLI (`gatewaymux-cli`), npm distribution wrapper (`gatewaymux`), embedded Dashboard (`@gatewaymux/dashboard`), the Rust Sync Server (`gatewaymux-sync-server`), and the Windows installer share a single, unified Semantic Version (`MAJOR.MINOR.PATCH`).
 2. **Independent Protocol Revisions**: Internal subsystems maintain independent schema/protocol revision numbers to allow forward/backward compatibility without forcing product version bumps:
    - Sync wire protocol (`sync_protocol_version`);
    - Configuration schema (`schema_version`);
@@ -5550,8 +5558,17 @@ EXPERIMENTAL  ──[ Conformance & Checklist ]──►  FIRST_CLASS  ──►
 1. **Branch Protection**: The `main` branch is protected. Direct pushes, force pushes, and branch deletions are strictly prohibited.
 2. **Merge Policy**: Squash merging into `main` is canonical. Standard merge commits and rebase merges are disabled. Merged branches are automatically deleted.
 3. **Ownership**: Repository ownership is unified under `@ArchdukeViel` via root `CODEOWNERS`.
-4. **Owner Approval Gate**: Pull requests authored by `@ArchdukeViel` are mergeable once required status checks pass. Pull requests authored by external contributors require an approved review from `@ArchdukeViel`. This is enforced via an isolated metadata-only status check workflow.
-5. **Tooling Integration**: GitHub Actions workflows invoke `cargo xtask` commands rather than duplicating validation logic in YAML scripts.
+4. **Mandatory Review vs. GitHub Approval**: The repository distinguishes two different requirements:
+   - **GitHub approval** — an actual GitHub `APPROVED` review — is REQUIRED for every PR authored by an external contributor or a bot (including Dependabot). GitHub does not permit a PR author to approve their own PR.
+   - **Mandatory review** — a deliberate, documented review of the complete diff — is REQUIRED for every PR, including PRs authored by `@ArchdukeViel`. Owner-authored PRs do NOT claim, require, or attempt an impossible GitHub self-approval; their review requirement is satisfied by a full diff review (with an independent read-only reviewer where available), resolution of all findings, and passing required checks before squash merge.
+5. **Owner Approval Gate (external/bot PRs)**: Enforced as a required, metadata-only status check (`.github/workflows/owner-approval.yml`):
+   - PRs authored by `@ArchdukeViel` pass the gate automatically.
+   - PRs authored by anyone else require a valid `APPROVED` review from `@ArchdukeViel` submitted against the PR's CURRENT head SHA; approvals for outdated revisions do not satisfy the gate, and dismissing the approval re-blocks the merge.
+   - **Lifecycle**: when a valid owner approval supersedes a previously failed gate run, the isolated re-evaluation workflow (`.github/workflows/owner-approval-rerun.yml`) re-runs the affected gate runs so the required check transitions to a merge-satisfying success state without manual workflow re-runs. The workflow verifies, from the GitHub event payload, that the event is an owner review, the reviewer is exactly `@ArchdukeViel`, the review state is `APPROVED`, and the target PR and head SHA still match. The external-owner-approval requirement is never weakened to remove a stale failure.
+6. **Dependabot Policy**: Dependabot groups are limited to `minor` and `patch` update types; major updates MUST be opened as separate, per-dependency PRs and are manually merged. Security updates are never grouped and remain individually visible.
+7. **Dependabot Post-Approval Auto-Merge**: Patch/minor Dependabot PRs MAY be auto-merged (squash) only after: the PR author is verified as GitHub Dependabot from event metadata; the update is proven non-major by diff analysis (unprovable updates fail closed); `@ArchdukeViel` has submitted a valid `APPROVED` review for the current PR revision; all required status checks pass; the PR is mergeable under the ruleset; no unresolved blocking review exists; and no risk/governance rule is bypassed. Enforcement is GitHub-native auto-merge, enabled per-PR by the isolated metadata-only workflow (`.github/workflows/dependabot-auto-merge.yml`), which never checks out or executes PR code, never approves PRs, and never merges major updates.
+8. **Workflow Security Boundary**: All `.github/workflows/**` modifications carry minimum risk class R4 (see §28.4). Workflows that hold write permissions MUST be metadata-only and MUST NOT check out or execute pull request code.
+9. **Tooling Integration**: GitHub Actions workflows invoke `cargo xtask` commands rather than duplicating validation logic in YAML scripts.
 
 # 29. Future Considerations
 
@@ -5604,6 +5621,7 @@ The following are intentionally outside the v1.0 acceptance boundary unless prom
 | Shared Profile | Syncable cross-device desired state. |
 | Device Overlay | Device-local paths, ports, Codex state, TLS material, and SecretStore references. |
 | Sync Backend | Provider-neutral backend implementing advertised S1/S2/S3 sync capabilities. |
+| Reference Sync Server | Self-hostable Rust service (`gatewaymux-sync-server`) implementing S3 sync capabilities; optional and independent of localhost-only GatewayMux use. |
 | State Bundle | Versioned `gatewaymux-state.gmx` export/import container. |
 
 ---
@@ -5743,6 +5761,7 @@ The following decisions are normative for v1.0.0.
 
 - v1 includes provider-neutral cloud state synchronization with Shared Profile + Device Overlay.
 - v1 ships an optional self-hostable GatewayMux Sync Server implementing S3 coordination.
+- The reference Sync Server is a Rust binary/service (`gatewaymux-sync-server`), not a Node.js/TypeScript application; it depends only on `gatewaymux-core` and `gatewaymux-sync`.
 - secrets remain local by default; optional secret synchronization uses a separate E2E encrypted vault.
 - v1 supports distributed quota/rate coordination for simultaneous devices sharing upstream accounts.
 - last-write-wins is forbidden for conflicting configuration revisions; conflicts become Safe Draft merge/review.
@@ -5763,12 +5782,17 @@ The following decisions are normative for v1.0.0.
 
 - Authority hierarchy: Security Requirements > GatewayMux PRD > Accepted ADRs > AGENTS.md > Scoped Rules > Issues > Code.
 - Rust multi-crate workspace enforcing directional dependencies: gatewaymux-app -> server/cli/codex-bridge/sync -> routing/providers/protocols -> core.
+- `gatewaymux-routing` is decoupled from `gatewaymux-providers`: routing depends only on `gatewaymux-core` and operates on provider-neutral contracts; provider-name branching is prohibited in the routing layer.
+- The Rust reference Sync Server (`gatewaymux-sync-server`) is a workspace member depending only on `gatewaymux-core` and `gatewaymux-sync`.
 - Core is strictly OS-neutral; Codex Bridge is Windows-specific and direct-calls Core.
 - Strict four artifact classes: SOURCE, GENERATED, FIXTURE, EPHEMERAL with root hygiene allowlist enforced by `xtask repo-check`.
-- R0–R4 change-risk classification model with path-derived minimums enforced in CI.
+- R0–R4 change-risk classification model with path-derived minimums enforced in CI; missing or under-declared risk classes are rejected for human/agent PRs, while the trusted Dependabot identity uses path-derived risk automatically.
+- All `.github/workflows/**` modifications carry minimum risk class R4: CI workflows are part of the repository security and software-supply-chain boundary.
+- Generated artifacts are verified by real deterministic regenerate-and-compare against their authoritative sources (`cargo xtask generate --check` never mutates the working tree; generators are registered/allowlisted in xtask and manifest paths are validated against traversal).
 - Provider lifecycle: EXPERIMENTAL -> FIRST_CLASS -> DEPRECATED. Experimental status must never compromise security, trust, or correctness.
-- Coordinated release versioning across binary, npm, dashboard, and sync server, with independent protocol/schema revisions.
-- GitHub branch protection with squash-merge only, automated Dependabot grouped updates, and metadata-only owner approval gate for single-owner workflow.
+- Coordinated release versioning across binary, CLI, npm wrapper, dashboard, Rust Sync Server, and Windows installer, with independent protocol/schema revisions.
+- GitHub branch protection with squash-merge only and metadata-only owner approval gate for single-owner workflow: mandatory review applies to every PR (including owner-authored PRs, which never claim a GitHub self-approval), while a GitHub `APPROVED` review from `@ArchdukeViel` is required only for external/bot PRs, pinned to the PR's current head SHA; a verified owner approval automatically re-runs previously failed gate runs so no manual workflow re-run is needed.
+- Dependabot: patch/minor updates may be grouped; major updates are isolated per-dependency PRs and manually merged; security updates stay individually visible. Patch/minor Dependabot PRs may auto-merge (squash) only after verified owner approval, proven non-major diff analysis, and all required checks pass; the automation is metadata-only and never approves or executes PR code.
 
 ---
 

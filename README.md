@@ -30,7 +30,7 @@ flowchart LR
 
 ## Documentation & Governance
 
-- **Product Authority**: [GatewayMux PRD v1.0.0 (Rev 5)](docs/GatewayMux_PRD_v1.0.0.md)
+- **Product Authority**: [GatewayMux PRD v1.0.0 (Rev 6)](docs/GatewayMux_PRD_v1.0.0.md)
 - **Agent Constitution**: [AGENTS.md](AGENTS.md)
 - **Contribution Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Security Policy**: [SECURITY.md](SECURITY.md)

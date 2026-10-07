@@ -1,45 +1,57 @@
 version: 2
 updates:
-  # Cargo workspace dependencies
+  # Cargo workspace dependencies.
+  # Patch/minor updates may be grouped; major updates are excluded from
+  # the group and MUST be opened as separate, per-dependency pull
+  # requests. Security updates are never grouped (group `applies-to`
+  # defaults to version-updates), so they remain individually visible.
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      cargo-dependencies:
-        patterns:
-          - "*"
+      cargo-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
-  # Dashboard and control plane npm workspace dependencies
+  # Dashboard npm workspace dependencies.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      dashboard-workspace-dependencies:
-        patterns:
-          - "*"
+      dashboard-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
-  # npm distribution packaging tooling
+  # npm distribution packaging tooling.
   - package-ecosystem: "npm"
     directory: "/packaging/npm"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
-      npm-distribution-tooling:
-        patterns:
-          - "*"
+      npm-distribution-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
 
-  # GitHub Actions workflow dependencies
+  # GitHub Actions workflow dependencies.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
-      github-actions:
-        patterns:
-          - "*"
+      github-actions-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"

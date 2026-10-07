@@ -1,5 +1,5 @@
 {
-  "version": 1,
-  "description": "Authoritative registry of mechanically generated files in the GatewayMux repository",
+  "version": 2,
+  "description": "Authoritative registry of mechanically generated files in the GatewayMux repository. Schema v2: each entry is machine-verified by `cargo xtask generate --check` via deterministic regenerate-and-compare against its authoritative source using the registered (allowlisted) generator.",
   "generated_files": []
 }

@@ -60,8 +60,6 @@ name = "gatewaymux-routing"
 version = "0.1.0"
 dependencies = [
  "gatewaymux-core",
- "gatewaymux-protocols",
- "gatewaymux-providers",
 ]
 
 [[package]]
@@ -79,6 +77,14 @@ name = "gatewaymux-sync"
 version = "0.1.0"
 dependencies = [
  "gatewaymux-core",
+]
+
+[[package]]
+name = "gatewaymux-sync-server"
+version = "0.1.0"
+dependencies = [
+ "gatewaymux-core",
+ "gatewaymux-sync",
 ]
 
 [[package]]

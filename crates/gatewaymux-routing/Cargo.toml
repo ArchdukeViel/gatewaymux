@@ -8,6 +8,6 @@ repository.workspace = true
 description = "GatewayMux routing engine, combo fallback, and quota management"
 
 [dependencies]
+# Routing operates on provider-neutral core/protocol contracts only.
+# It MUST NOT depend on concrete provider adapter implementations.
 gatewaymux-core = { workspace = true }
-gatewaymux-protocols = { workspace = true }
-gatewaymux-providers = { workspace = true }

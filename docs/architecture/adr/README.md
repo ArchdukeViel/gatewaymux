@@ -8,4 +8,5 @@ This directory records architecturally significant decisions for GatewayMux.
 - Status flows: `Proposed` -> `Accepted` | `Rejected` -> `Superseded`.
 
 ## Index of ADRs
-- [0001 - Repository Workspace and Governance Scaffolding](0001-repository-workspace-and-governance-scaffolding.md) (Accepted)
+- [0001 - Repository Workspace and Governance Scaffolding](0001-repository-workspace-and-governance-scaffolding.md) (Accepted; directional dependency contract amended by ADR-0002)
+- [0002 - Routing/Provider Decoupling and Rust Reference Sync Server](0002-routing-provider-decoupling-and-rust-sync-server.md) (Accepted)

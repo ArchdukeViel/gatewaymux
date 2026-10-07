@@ -36,7 +36,9 @@ gatewaymux/
 │   └── xtask/                 # Developer automation and CI governance task runner
 │
 ├── dashboard/                 # Control Plane web application (npm workspace)
-├── sync-server/               # Reference Sync Server implementation (npm workspace)
+├── sync-server/               # Rust reference Sync Server (workspace member
+│   ├── Cargo.toml             #   `gatewaymux-sync-server`; depends on core+sync)
+│   └── src/main.rs            #   pre-implementation behavior-free scaffold
 │
 ├── compat/                    # Durable Compatibility Corpus fixtures
 │   ├── codex/                 # Codex client transcripts
@@ -81,14 +83,16 @@ gatewaymux/
 │   └── rules/                 # Scoped contributor rules
 │
 └── .github/                   # GitHub Actions and repository configuration
-    ├── workflows/             # CI, security, and owner-approval workflows
+    ├── workflows/             # CI, security, owner-approval, and Dependabot policy workflows
     ├── ISSUE_TEMPLATE/        # Issue forms for bugs, providers, regressions
     ├── CODEOWNERS             # Repository-wide ownership (@ArchdukeViel)
     ├── PULL_REQUEST_TEMPLATE.md# Pull request template
-    └── dependabot.yml         # Dependabot grouped update configuration
+    └── dependabot.yml         # Dependabot patch/minor grouping (majors isolated)
 ```
 
 ## Directional Dependencies
+
+`gatewaymux-routing` depends only on `gatewaymux-core` (provider-neutral contracts; it MUST NOT depend on `gatewaymux-providers`). The Rust reference Sync Server (`gatewaymux-sync-server`) depends only on `gatewaymux-core` and `gatewaymux-sync`.
 
 ```mermaid
 flowchart TD
@@ -108,12 +112,13 @@ flowchart TD
     BRID --> CORE
     SYNC --> CORE
 
-    ROUT --> PROV
-    ROUT --> PROT
     ROUT --> CORE
 
     PROV --> PROT
     PROV --> CORE
 
     PROT --> CORE
+
+    SYNCS[gatewaymux-sync-server] --> SYNC
+    SYNCS --> CORE
 ```

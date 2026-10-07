@@ -1,7 +1,7 @@
 # ADR-0001: Repository Workspace and Governance Scaffolding
 
 ## Status
-Accepted
+Accepted (directional dependency contract amended by ADR-0002)
 
 ## Context
 GatewayMux is a greenfield, multi-provider LLM gateway with strict requirements for OS portability (Core is OS-neutral while Codex Bridge is Windows-specific), architectural boundary enforcement, and contributor governance before product feature implementation begins. We need an enforceable repository baseline that prevents architectural erosion, credential leakage, and unauthorized dependency inversion.
@@ -18,8 +18,8 @@ GatewayMux is a greenfield, multi-provider LLM gateway with strict requirements 
    - `gatewaymux-cli`: CLI binary and commands.
    - `gatewaymux-app`: Unified native application entrypoint.
    - `xtask`: Independent automation and architecture enforcement runner.
-2. **Behavior-Free npm Workspace**: Minimal package metadata for `dashboard`, `sync-server`, and `packaging/npm` without product logic or postinstall downloads.
-3. **Directional Dependency Enforcement**: Enforce `app -> server/cli/bridge/sync -> routing/providers/protocols -> core` via `cargo xtask architecture-check`.
+2. **Behavior-Free npm Workspace**: Minimal package metadata for `dashboard`, `sync-server`, and `packaging/npm` without product logic or postinstall downloads. (Amended by ADR-0002: the reference Sync Server is now the Rust workspace member `gatewaymux-sync-server` at `sync-server/`; the npm workspaces cover only `dashboard` and `packaging/npm`.)
+3. **Directional Dependency Enforcement**: Enforce `app -> server/cli/bridge/sync -> routing/providers/protocols -> core` via `cargo xtask architecture-check`. Amended by ADR-0002: `gatewaymux-routing` depends only on `gatewaymux-core`, and the Rust reference Sync Server (`gatewaymux-sync-server`) depends only on `gatewaymux-core` and `gatewaymux-sync`.
 4. **Change-Risk Model (R0–R4)**: Enforce path-derived risk floors in CI.
 5. **Strict Repository Hygiene**: Whitelist root files and enforce via `cargo xtask repo-check`.
 
@@ -33,5 +33,6 @@ GatewayMux is a greenfield, multi-provider LLM gateway with strict requirements 
 - **Negative / Trade-offs**: Initial workspace scaffolding overhead; requiring `cargo xtask` for repository validation.
 
 ## References
-- GatewayMux PRD v1.0.0 (Rev 5), Section 28 (Repository & Engineering Governance).
+- GatewayMux PRD v1.0.0 (Rev 6), Section 28 (Repository & Engineering Governance).
 - PRD Appendix B (Decision Register).
+- ADR-0002 (Routing/Provider Decoupling and Rust Reference Sync Server).

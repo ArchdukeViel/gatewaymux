@@ -11,7 +11,7 @@ GatewayMux uses an explicit five-tier risk model to ensure that high-impact area
 
 ### R1 — Isolated Implementation
 - **Scope**: Internal utilities, unit tests, CLI formatters, packaging scripts, non-critical leaf changes.
-- **Paths**: `crates/gatewaymux-cli/**`, `crates/gatewaymux-app/**`, `crates/xtask/**`, `dashboard/**`, `sync-server/**`, `packaging/**`, `tests/**`, `scripts/**`.
+- **Paths**: `crates/gatewaymux-cli/**`, `crates/gatewaymux-app/**`, `crates/xtask/**`, `dashboard/**`, `packaging/**`, `tests/**`, `scripts/**`.
 - **Verification**: Unit tests pass, workspace compilation, clippy clean.
 
 ### R2 — Provider & Protocol Behavior
@@ -25,13 +25,17 @@ GatewayMux uses an explicit five-tier risk model to ensure that high-impact area
 - **Verification**: Integration tests, combo simulation, migration rollback testing, error taxonomy mapping validation.
 
 ### R4 — Critical Trust & Platform Boundaries
-- **Scope**: Security, authentication, secret storage, cloud state sync, Codex process interception, Win32 hooks.
-- **Paths**: `crates/gatewaymux-codex-bridge/**`, `crates/gatewaymux-sync/**`, `docs/security/**`, secret management modules.
+- **Scope**: Security, authentication, secret storage, cloud state sync, the reference Sync Server, Codex process interception, Win32 hooks, and the CI workflow security / software-supply-chain boundary.
+- **Paths**: `crates/gatewaymux-codex-bridge/**`, `crates/gatewaymux-sync/**`, `sync-server/**`, `.github/workflows/**`, `docs/security/**`, secret management modules.
 - **Verification**: Threat model review, end-to-end sync consistency, memory safety audit, manual sign-off by `@ArchdukeViel`.
+
+All `.github/workflows/**` modifications are minimum R4 because CI workflows are part of the repository security and software-supply-chain boundary (they define how code is built, validated, and — in the case of privileged workflows — what automation may act on the repository).
 
 ## Path Minima & Escalation Policy
 
 1. **Path-Derived Minimum**: CI scans all files changed in a PR and determines the highest risk tier among the affected paths.
-2. **Elevation Allowed**: Contributors may declare a higher risk class than the path-derived minimum if a change is conceptually sensitive despite touching fewer lines.
-3. **Downgrade Forbidden**: CI automatically rejects any PR whose declared risk class is lower than the path-derived minimum.
-4. **Cross-Cutting Changes**: If a PR touches multiple tiers (e.g. `gatewaymux-routing` and `gatewaymux-sync`), the entire PR escalates to the highest tier (R4).
+2. **Mandatory Declaration (human/agent PRs)**: Every human- or agent-authored pull request MUST declare its risk class in the PR template. A missing declaration FAILS the `Risk Classification Verification` check. A declared risk lower than the path-derived minimum also FAILS.
+3. **Trusted Dependabot Exemption**: Pull requests authored by GitHub Dependabot are exempt from manual declaration. Their governing risk class is derived automatically from the changed paths and must be derivable from a non-empty change set. The exemption is granted only to the verified Dependabot identity supplied by CI event metadata — never to PR body text, and never as a generic bot exemption.
+4. **Elevation Allowed**: Contributors may declare a higher risk class than the path-derived minimum if a change is conceptually sensitive despite touching fewer lines.
+5. **Downgrade Forbidden**: CI automatically rejects any PR whose declared risk class is lower than the path-derived minimum.
+6. **Cross-Cutting Changes**: If a PR touches multiple tiers (e.g. `gatewaymux-routing` and `gatewaymux-sync`), the entire PR escalates to the highest tier (R4).
