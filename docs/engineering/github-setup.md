@@ -19,40 +19,32 @@ The following settings have been automatically configured via the authenticated 
   - `secret_scanning`: `enabled`.
   - `secret_scanning_push_protection`: `enabled`.
 
-## 2. Branch Protection & The Single-Owner Exception
+## 2. Active Branch Protection Ruleset (Ruleset ID: 24628464)
 
-### Desired Policy
-- Pull requests required before merging into `main`.
-- Direct pushes to `main` prohibited.
-- Force pushes and branch deletion prohibited.
-- Strict CI status checks required (`repo-hygiene`, `rust-validation`, `npm-validation`, `risk-assessment`, `owner-approval`).
-- Owner approval required for external contributions.
+The repository uses GitHub Rulesets (`main-protection`), enforced actively on `refs/heads/main`:
+- **Branch Protection & Enforcement**: `active`
+- **Protected Target**: `refs/heads/main`
+- **Direct Pushes**: Prohibited (pull request required before merging)
+- **Force Pushes**: Prohibited (`non_fast_forward`)
+- **Branch Deletion**: Prohibited (`deletion`)
+- **Allowed Merge Methods**: Strictly `squash`
+- **Required Status Checks**:
+  - `Owner Approval Gate`
+  - `Repository Hygiene & Architecture`
+  - `Rust Check, Clippy & Tests`
+  - `npm Workspaces Validation`
+  - `Risk Classification Verification`
+  - `Release Readiness & Version Alignment`
 
-### GitHub Platform Limitation & Resolution
+### Single-Owner Approval Protocol
 Under native GitHub Branch Protection, configuring `required_approving_review_count = 1` prevents PR authors from approving their own PRs. For a single-owner repository owned by `@ArchdukeViel`, this would make owner-authored PRs completely unmergeable without creating a dummy second GitHub account.
 
 **Resolution**:
-1. Branch protection enforces **Required Status Checks** rather than a native review count.
+1. The ruleset sets `required_approving_review_count = 0` at the native ruleset level, but mandates the `Owner Approval Gate` status check.
 2. An isolated, metadata-only GitHub Actions check (`.github/workflows/owner-approval.yml`) acts as the gate:
-   - If PR author is `@ArchdukeViel`: status check passes immediately.
-   - If PR author is an external contributor: status check inspects PR reviews using GitHub API and requires an `APPROVED` review from `@ArchdukeViel`.
+   - If PR author is `@ArchdukeViel`: status check passes automatically.
+   - If PR author is an external contributor: status check queries PR reviews via GitHub API and requires an `APPROVED` review from `@ArchdukeViel`.
 3. This achieves exact single-owner security without unmergeable deadlocks.
-
-## 3. Manual Steps (Web UI Verification)
-
-To enable branch protection on `main` via the GitHub Web UI or API:
-1. Navigate to **Settings** -> **Branches** -> **Add branch protection rule**.
-2. Set **Branch name pattern**: `main`.
-3. Check **Require status checks to pass before merging**:
-   - Require branches to be up to date before merging.
-   - Select required status checks:
-     - `repo-hygiene`
-     - `rust-validation`
-     - `npm-validation`
-     - `risk-assessment`
-     - `Owner Approval Gate`
-4. Check **Do not allow bypassing the above settings**.
-5. Save changes.
 
 ## 4. Dependabot
 
