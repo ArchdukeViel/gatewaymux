@@ -10,6 +10,7 @@ members = [
     "crates/gatewaymux-cli",
     "crates/gatewaymux-app",
     "crates/xtask",
+    "sync-server",
 ]
 resolver = "2"
 
@@ -31,6 +32,7 @@ gatewaymux-codex-bridge = { path = "crates/gatewaymux-codex-bridge" }
 gatewaymux-server = { path = "crates/gatewaymux-server" }
 gatewaymux-cli = { path = "crates/gatewaymux-cli" }
 gatewaymux-app = { path = "crates/gatewaymux-app" }
+gatewaymux-sync-server = { path = "sync-server" }
 
 # Shared dependencies
 serde = { version = "1.0", features = ["derive"] }

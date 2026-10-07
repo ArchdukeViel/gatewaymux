@@ -51,6 +51,7 @@ jobs:
       - name: Evaluate change-risk class
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           BASE_REF: ${{ github.base_ref }}
         run: |
           if ($env:BASE_REF) {

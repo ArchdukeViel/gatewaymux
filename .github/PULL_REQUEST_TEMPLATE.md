@@ -5,12 +5,14 @@
 <!-- What problem does this solve or what requirement does this fulfill? -->
 
 ## Declared Risk Class
-<!-- Select exactly one declared risk tier. Note: CI enforces path-derived minimums. -->
+<!-- Select exactly one declared risk tier. CI enforces path-derived minimums.
+     A declaration is MANDATORY for human/agent PRs (missing = FAIL).
+     Trusted Dependabot PRs are exempt: path-derived risk applies automatically. -->
 - [ ] **R0**: Docs / comments / non-runtime fixtures
 - [ ] **R1**: Isolated implementation / unit tests / CLI
 - [ ] **R2**: Provider / protocol / model-profile behavior
 - [ ] **R3**: Routing / persistence / public API / configuration
-- [ ] **R4**: Security / auth / trust / cloud sync / Codex interception
+- [ ] **R4**: Security / auth / trust / cloud sync / Codex interception / `.github/workflows/**` / sync-server
 
 ## Affected Contracts & Areas
 - [ ] `gatewaymux-core`
@@ -21,7 +23,9 @@
 - [ ] `gatewaymux-codex-bridge`
 - [ ] `gatewaymux-server`
 - [ ] `gatewaymux-cli` / `gatewaymux-app`
-- [ ] `dashboard` / `sync-server`
+- [ ] `dashboard` (npm workspace)
+- [ ] `sync-server` (Rust reference sync server)
+- [ ] `.github/workflows/**` (R4 supply-chain boundary)
 - [ ] Profiles / Schemas / Documentation
 
 ## Correctness Impact

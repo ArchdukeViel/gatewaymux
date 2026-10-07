@@ -2,10 +2,9 @@
   "name": "gatewaymux-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "GatewayMux monorepo workspace for dashboard, sync-server, and distribution packaging",
+  "description": "GatewayMux monorepo workspace for dashboard and distribution packaging",
   "workspaces": [
     "dashboard",
-    "sync-server",
     "packaging/npm"
   ],
   "scripts": {

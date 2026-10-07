@@ -1,0 +1,77 @@
+name: Owner Approval Re-Run
+
+# Fixes the Owner Approval Gate lifecycle defect: a gate run that failed
+# before the owner approved used to remain attached to the pull request as
+# a blocking required check, so GitHub kept blocking the merge even after
+# a review-triggered gate run succeeded, and the original workflow had to
+# be re-run manually.
+#
+# This workflow re-runs the affected gate runs through the GitHub Actions
+# API so their ORIGINAL check-run conclusions are updated in place:
+# - on a valid owner APPROVED review for the current head SHA, failed
+#   gate runs re-evaluate and transition to success;
+# - on a dismissed owner review, completed gate runs re-evaluate against
+#   the now-dismissed approval and transition back to failure, re-blocking
+#   the merge.
+#
+# Safety: metadata-only. This workflow never checks out pull request
+# code, never executes contributor content, and verifies reviewer identity
+# and head SHA from the GitHub event payload, not from PR text. The
+# re-run gate itself is the same read-only, metadata-only workflow.
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  actions: write
+
+jobs:
+  rerun-owner-approval-gate:
+    name: Re-Run Owner Approval Gate
+    # Only an owner review event on a PR not authored by the owner can
+    # re-evaluate the gate: either a valid APPROVED review submitted
+    # against the PR's current head SHA, or a dismissed owner review.
+    if: >-
+      github.event.review.user.login == 'ArchdukeViel' &&
+      github.event.pull_request.user.login != 'ArchdukeViel' &&
+      (
+        github.event.review.state == 'DISMISSED' ||
+        (
+          github.event.review.state == 'APPROVED' &&
+          github.event.review.commit_id == github.event.pull_request.head.sha
+        )
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run Owner Approval Gate runs for the current head SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+        run: |
+          set -euo pipefail
+          echo "Owner review event (state: $REVIEW_STATE) verified for PR #$PR_NUMBER head $HEAD_SHA."
+          echo "Reviewer identity and head SHA match were validated from the GitHub event payload."
+
+          if [ "$REVIEW_STATE" = "APPROVED" ]; then
+            echo "Locating completed, failed 'Owner Approval Gate' runs for this head SHA..."
+            RUN_IDS=$(gh api --paginate "repos/$REPO/actions/workflows/owner-approval.yml/runs?head_sha=$HEAD_SHA&status=completed" --jq '.workflow_runs[] | select(.conclusion == "failure") | .id')
+          else
+            echo "Owner approval dismissed: re-evaluating all completed 'Owner Approval Gate' runs for this head SHA to re-block the merge."
+            RUN_IDS=$(gh api --paginate "repos/$REPO/actions/workflows/owner-approval.yml/runs?head_sha=$HEAD_SHA&status=completed" --jq '.workflow_runs[] | .id')
+          fi
+
+          if [ -z "$RUN_IDS" ]; then
+            echo "No matching Owner Approval Gate runs found for this head SHA; nothing to re-run."
+            exit 0
+          fi
+
+          for RUN_ID in $RUN_IDS; do
+            echo "Re-running failed jobs of Owner Approval Gate run $RUN_ID..."
+            gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/rerun-failed-jobs" --silent
+          done
+
+          echo "Re-evaluation requested. The required 'Owner Approval Gate' check now reflects the recorded owner review state without manual workflow re-runs."

@@ -1,5 +1,23 @@
 name: Owner Approval Gate
 
+# Metadata-only required status check. This workflow NEVER checks out
+# pull request code and holds read-only permissions, so it is safe on
+# `pull_request_target` triggers (workflow definitions are always taken
+# from the base branch).
+#
+# Policy (PRD Section 28.7):
+# - PRs authored by @ArchdukeViel do not require (and cannot receive) a
+#   GitHub self-approval; this gate passes for them.
+# - PRs authored by anyone else (external contributors or bots, including
+#   Dependabot) require a valid APPROVED review from @ArchdukeViel that
+#   was submitted against the PR's CURRENT head SHA. Stale approvals do
+#   not satisfy the gate.
+#
+# Lifecycle note: when a previously failed gate run is superseded by a
+# valid owner approval, the `owner-approval-rerun.yml` workflow re-runs
+# the failed gate runs so their check-run conclusions transition to
+# success without any manual workflow re-run.
+
 on:
   pull_request_target:
     types: [opened, reopened, synchronize]
@@ -20,9 +38,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           echo "PR Author: $PR_AUTHOR"
+          echo "PR Head SHA: $PR_HEAD_SHA"
           AUTHOR_LOWER=$(echo "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
           if [ "$AUTHOR_LOWER" = "archdukeviel" ]; then
             echo "Author is repository owner (@ArchdukeViel). Approval gate passed automatically."
@@ -30,12 +51,17 @@ jobs:
           fi
 
           echo "External contribution detected. Checking for owner approval from @ArchdukeViel..."
-          LATEST_STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select((.user.login | ascii_downcase) == "archdukeviel")] | last | .state')
+          LATEST_STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select((.user.login | ascii_downcase) == "archdukeviel")] | last | .state // "none"')
+          LATEST_COMMIT_ID=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select((.user.login | ascii_downcase) == "archdukeviel")] | last | .commit_id // "none"')
+
+          if [ "$LATEST_STATE" = "APPROVED" ] && [ "$LATEST_COMMIT_ID" = "$PR_HEAD_SHA" ]; then
+            echo "Found valid APPROVED review from @ArchdukeViel for the current head SHA. Approval gate passed."
+            exit 0
+          fi
 
           if [ "$LATEST_STATE" = "APPROVED" ]; then
-            echo "Found valid APPROVED review from @ArchdukeViel. Approval gate passed."
-            exit 0
+            echo "::error::The latest APPROVED review from @ArchdukeViel was submitted against an outdated commit ($LATEST_COMMIT_ID, current head is $PR_HEAD_SHA). The approval must be re-submitted for the current PR revision."
           else
-            echo "::error::Pull requests from external contributors require explicit approval from @ArchdukeViel. Current owner review state: ${LATEST_STATE:-none}"
-            exit 1
+            echo "::error::Pull requests from external contributors require explicit approval from @ArchdukeViel for the current PR revision. Current owner review state: ${LATEST_STATE:-none}"
           fi
+          exit 1

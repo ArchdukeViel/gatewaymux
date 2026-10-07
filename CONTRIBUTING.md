@@ -40,9 +40,20 @@ Every PR MUST declare its risk class in the pull request template:
 - **R1 (Isolated Implementation)**: Leaf utilities, unit tests, CLI formatting.
 - **R2 (Provider & Protocol Behavior)**: Upstream adapters, model profiles, dialect conversions.
 - **R3 (Core Routing & APIs)**: Combo fallback, quota engines, persistence schemas, public endpoints.
-- **R4 (Critical Trust & Platform)**: Security, authentication, secrets, cloud sync, Codex interception.
+- **R4 (Critical Trust & Platform)**: Security, authentication, secrets, cloud sync, the reference Sync Server, Codex interception, and all `.github/workflows/**` changes (the CI workflow security / software-supply-chain boundary).
 
-CI automatically computes a path-derived minimum risk from the modified files. Contributors may raise the declared risk, but cannot lower it below the path-derived minimum.
+CI automatically computes a path-derived minimum risk from the modified files. Contributors may raise the declared risk, but cannot lower it below the path-derived minimum. A **missing declaration fails the `Risk Classification Verification` check** — the declaration is mandatory for human- and agent-authored PRs.
+
+**Trusted Dependabot PRs** are exempt from manual declaration: their governing risk class is derived automatically from the changed paths. This exemption is tied to the verified GitHub Dependabot identity from CI event metadata — it is not a generic bot exemption, and PR body text is never trusted for identity.
+
+## Mandatory Review vs. Owner Approval
+
+GitHub does not permit a PR author to approve their own PR. The repository therefore distinguishes:
+
+- **GitHub approval**: an actual `APPROVED` review from `@ArchdukeViel` — required for every PR authored by an external contributor or a bot (including Dependabot). The approval must be for the PR's current head SHA; pushing new commits invalidates prior approvals, and the required `Owner Approval Gate` check re-evaluates automatically (including re-running previously failed gate runs after a valid approval, so no manual workflow re-run is needed).
+- **Mandatory review**: a deliberate review of the complete diff — required for **every** PR, including PRs authored by `@ArchdukeViel`. Owner-authored PRs never claim a GitHub self-approval; they are merged only after a documented full diff review (with an independent read-only reviewer where available), resolution of all findings, and green required checks.
+
+Unresolved review findings block merge in all cases.
 
 ## Architectural Boundaries
 
@@ -50,6 +61,8 @@ GatewayMux enforces a strict directional dependency rule:
 `gatewaymux-app` → `server` / `cli` / `codex-bridge` / `sync` → `routing` / `providers` / `protocols` → `gatewaymux-core`
 
 - `gatewaymux-core` is strictly OS-neutral and depends on no workspace crates.
+- `gatewaymux-routing` depends only on `gatewaymux-core`. It must not depend on `gatewaymux-providers`: routing operates on provider-neutral contracts and candidate data, and provider-name branching for provider-specific behavior is prohibited in the routing layer.
+- The Rust reference Sync Server (`gatewaymux-sync-server` at `sync-server/`) depends only on `gatewaymux-core` and `gatewaymux-sync`.
 - Provider code must not depend on the dashboard.
 - Dashboard consumes control-plane REST/WebSocket contracts and does not reach into Rust internals.
 - Codex Bridge calls Core directly and must not reach into provider internals.
@@ -58,7 +71,7 @@ Violations are caught by `cargo xtask architecture-check`.
 
 ## Generated Files & Manifest
 
-Any mechanically generated files (e.g. schemas, manifests) belong to the `GENERATED` class. They must never be manually edited. Changes must be made to the authoritative source and regenerated via `cargo xtask generate`. CI checks for drift using `cargo xtask generate --check`.
+Any mechanically generated files (e.g. schemas, manifests) belong to the `GENERATED` class. They must never be manually edited. Changes must be made to the authoritative source and regenerated via `cargo xtask generate`. CI verifies real reproducibility: `cargo xtask generate --check` deterministically regenerates each registered output and byte-compares it with the tracked artifact (manifest schema v2; only generators registered in xtask are valid; the check never writes to the working tree).
 
 ## Compatibility Corpus Obligations
 

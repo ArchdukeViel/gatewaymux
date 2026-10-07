@@ -1,0 +1,17 @@
+[package]
+name = "gatewaymux-sync-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux Reference Sync Server (Rust service scaffold)"
+
+# Pre-implementation scaffold. No sync protocol behavior, HTTP endpoints,
+# leases, counters, device enrollment, encrypted vault storage, or
+# database persistence is implemented in this phase. The dependency
+# wiring below declares the intended architectural direction only:
+# the reference server consumes GatewayMux core and sync contracts.
+[dependencies]
+gatewaymux-core = { workspace = true }
+gatewaymux-sync = { workspace = true }
