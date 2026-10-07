@@ -3,8 +3,8 @@
 > **Product**: GatewayMux  
 > **Version**: `1.0.0`  
 > **Status**: Greenfield Architecture Baseline / Living Product Specification  
-> **Document Revision**: `Rev 4`  
-> **Date**: 2026-10-06  
+> **Document Revision**: `Rev 5`  
+> **Date**: 2026-10-07  
 > **Target Repository**: `ArchdukeViel/gatewaymux`  
 > **License**: MIT  
 > **Primary Release Platform**: Windows 10/11 x86_64  
@@ -42,12 +42,13 @@
 25. [Distribution, Installation, Updates, Rollback, and Uninstall](#25-distribution-installation-updates-rollback-and-uninstall)
 26. [Testing and CI/CD](#26-testing-and-cicd)
 27. [Release Acceptance Criteria](#27-release-acceptance-criteria)
-28. [Future Considerations](#28-future-considerations)
-29. [Appendix A - Glossary](#appendix-a---glossary)
-30. [Appendix B - Decision Register](#appendix-b---decision-register)
-31. [Appendix C - Reference Configuration](#appendix-c---reference-configuration)
-32. [Appendix D - Error Taxonomy](#appendix-d---error-taxonomy)
-33. [Appendix E - Provider and Distribution Reference Sources](#appendix-e---provider-and-distribution-reference-sources)
+28. [Repository & Engineering Governance](#28-repository--engineering-governance)
+29. [Future Considerations](#29-future-considerations)
+30. [Appendix A - Glossary](#appendix-a---glossary)
+31. [Appendix B - Decision Register](#appendix-b---decision-register)
+32. [Appendix C - Reference Configuration](#appendix-c---reference-configuration)
+33. [Appendix D - Error Taxonomy](#appendix-d---error-taxonomy)
+34. [Appendix E - Provider and Distribution Reference Sources](#appendix-e---provider-and-distribution-reference-sources)
 
 ---
 
@@ -5414,7 +5415,145 @@ Reference Sync Server passes S3 multi-device tests; configuration conflicts neve
 
 `npm install -g gatewaymux` and `npx gatewaymux` execute the same signed native release version on supported Windows architecture without postinstall binary download or hidden machine modifications.
 
-# 28. Future Considerations
+# 28. Repository & Engineering Governance
+
+This section establishes the normative engineering governance, repository architecture, operational enforcement, and quality gates for the GatewayMux codebase. All contributors and automated agents MUST adhere to these rules.
+
+## 28.1 Authority Hierarchy
+
+When resolving requirements, architectural decisions, implementation choices, or conflicting instructions, contributors and AI agents MUST adhere strictly to the following precedence hierarchy:
+
+1. **Security Requirements & Invariants**: Absolute non-negotiable protection of secrets, API credentials, local-first loopback boundaries, process isolation, and egress trust policies.
+2. **GatewayMux PRD (`docs/GatewayMux_PRD_v1.0.0.md`)**: The authoritative product and architecture contract for GatewayMux v1.0.
+3. **Accepted Architecture Decision Records (`docs/architecture/adr/*.md`)**: Formal architectural decisions extending or operationalizing the PRD.
+4. **Repository Constitution (`AGENTS.md`)**: Repository-level operational constitution governing contributors and agents.
+5. **Scoped Contributor Rules (`.agents/rules/*.md`)**: Focused subsystem guidelines operationalizing architecture requirements.
+6. **Issue / Implementation Task Description**: Scoped execution instructions for individual pull requests or work packages.
+7. **Implementation Code & Tests**: The concrete executable artifacts.
+
+**Conflict Protocol**: If any implementation task or code discovery appears to conflict with a higher-level authority, the contributor or agent MUST NOT silently change architecture or weaken requirements. The conflict MUST be surfaced explicitly to the repository owner (`ArchdukeViel`) for resolution.
+
+## 28.2 Workspace Boundaries and Directional Dependency Policy
+
+The GatewayMux repository is organized as a multi-crate Rust workspace complemented by a behavior-free npm workspace. Architectural layers MUST enforce strict directional dependency boundaries:
+
+```mermaid
+flowchart TD
+    APP[gatewaymux-app] --> SERV[gatewaymux-server]
+    APP --> CLI[gatewaymux-cli]
+    APP --> BRID[gatewaymux-codex-bridge]
+    APP --> SYNC[gatewaymux-sync]
+
+    SERV --> ROUT[gatewaymux-routing]
+    SERV --> PROV[gatewaymux-providers]
+    SERV --> PROT[gatewaymux-protocols]
+    SERV --> CORE[gatewaymux-core]
+
+    CLI --> SERV
+    CLI --> CORE
+
+    BRID --> CORE
+    SYNC --> CORE
+
+    ROUT --> PROV
+    ROUT --> PROT
+    ROUT --> CORE
+
+    PROV --> PROT
+    PROV --> CORE
+
+    PROT --> CORE
+```
+
+Normative boundaries:
+1. **`gatewaymux-core`**: Defines canonical operation representations, quality contracts, trust boundaries, credential abstractions, and domain models. Core MUST be strictly OS-neutral and provider-agnostic. Core MUST NOT depend on any internal workspace crate, Win32 APIs, or provider implementations.
+2. **`gatewaymux-protocols`**: Handles wire-protocol serialization, deserialization, schema dialect translation, and transport compatibility profiles. Depends only on `gatewaymux-core`.
+3. **`gatewaymux-providers`**: Implements upstream provider adapters and credential protocols. Depends on `gatewaymux-core` and `gatewaymux-protocols`. Provider implementations MUST NOT depend on the control-plane dashboard or HTTP server layers.
+4. **`gatewaymux-routing`**: Encapsulates combo fallback chains, quota enforcement, model resolution, adaptive deployment selection, retry budgets, and attempt ledgers. Depends on `gatewaymux-core`, `gatewaymux-protocols`, and `gatewaymux-providers`.
+5. **`gatewaymux-sync`**: Cloud State Sync protocol client, distributed quota coordination, and state reconciliation. Depends on `gatewaymux-core`.
+6. **`gatewaymux-codex-bridge`**: Windows-specific Codex subagent interceptor. MUST NOT depend directly on provider implementations (`gatewaymux-providers`); all intercepted subagent traffic MUST dispatch through GatewayMux Core routing contracts.
+7. **`gatewaymux-server`**: Implements separate HTTP listeners for data plane and control plane. Depends on `gatewaymux-core`, `gatewaymux-protocols`, `gatewaymux-routing`, and `gatewaymux-providers`.
+8. **`gatewaymux-cli`**: Command-line administrative interface and daemon controls.
+9. **`gatewaymux-app`**: Native application executable assembling server, CLI, Codex Bridge, and optional tray support.
+10. **`crates/xtask`**: Independent developer task runner and enforcement tool; isolated from runtime product binaries.
+11. **`dashboard` / Control-Plane UI**: Consumes defined control-plane REST/WebSocket contracts; MUST NOT reach into Rust crate internals.
+
+Directional enforcement is mechanically verified on every commit and PR by `cargo xtask architecture-check`.
+
+## 28.3 Four Repository Artifact Classes & Root Hygiene
+
+All repository contents MUST belong to one of four well-defined artifact classes:
+
+| Artifact Class | Description | Management & Versioning |
+|---|---|---|
+| `SOURCE` | Human- or agent-authored authoritative files (Rust source, documentation, templates, configurations). | Tracked in Git; subject to strict peer review and linting. |
+| `GENERATED` | Mechanically produced from authoritative source files (derived schemas, manifests, build assets). | Tracked only when required; strictly prohibited from hand-editing; verified for reproducibility via `cargo xtask generate --check`. |
+| `FIXTURE` | Durable test vectors, protocol transcripts, and Compatibility Corpus captures. | Tracked in Git; MUST be strictly sanitized (zero real API keys, credentials, or PII). |
+| `EPHEMERAL` | Build outputs, test dumps, coverage reports, caches, temporary agent scratchpads. | Strictly untracked; MUST be ignored by `.gitignore` and MUST NOT pollute repository root. |
+
+**Repository Root Hygiene**: The repository root is governed by a strict allowlist. Any unapproved file or directory introduced into root fails `cargo xtask repo-check`.
+
+## 28.4 Change-Risk Model (R0–R4) & Path-Derived Minimums
+
+All code modifications are categorized into five risk classes determining verification depth, testing requirements, and review rigor:
+
+| Risk Class | Domain & Impact | Path Minimum Examples | Minimum Verification Required |
+|---|---|---|---|
+| **R0** | Non-runtime changes (documentation, comments, non-runtime fixtures). | `docs/**`, `*.md`, `.editorconfig`, `.gitattributes`, `.gitignore` | Formatting check, documentation link verification. |
+| **R1** | Isolated implementation (unit test additions, internal leaf helpers). | `crates/gatewaymux-cli/**`, `packaging/**`, `tests/**`, `scripts/**` | Unit tests pass, workspace compilation, lint clean. |
+| **R2** | Provider & protocol adapters (model profiles, dialect mappings, transport profiles). | `crates/gatewaymux-providers/**`, `crates/gatewaymux-protocols/**`, `profiles/**`, `compat/**` | Conformance tests, compatibility corpus check, protocol serialization round-trip tests. |
+| **R3** | Core routing, public API, persistence, configuration. | `crates/gatewaymux-routing/**`, `crates/gatewaymux-server/**`, `crates/gatewaymux-core/**`, `config/**` | Integration tests, combo fallback simulation, migration idempotent validation. |
+| **R4** | Critical security, authentication, secrets, cloud sync, Codex interception. | `crates/gatewaymux-codex-bridge/**`, `crates/gatewaymux-sync/**`, `docs/security/**`, secret management | Security review, end-to-end sync verification, isolation proof, multi-device safety validation. |
+
+Every pull request MUST declare its risk class in the PR template. CI automatically calculates the path-derived minimum risk class from modified files. Contributors MAY raise the declared risk class, but CI MUST reject any PR whose declared risk is lower than the path-derived minimum.
+
+## 28.5 Provider Lifecycle & Promotion Policy
+
+Providers progress through three formal lifecycle states:
+
+```
+EXPERIMENTAL  ──[ Conformance & Checklist ]──►  FIRST_CLASS  ──►  DEPRECATED
+```
+
+1. **`EXPERIMENTAL`**: New or external provider integrations.
+   - MUST be explicit opt-in;
+   - MUST be visibly labeled as experimental in UI and logs;
+   - MUST be excluded from recommended setup and default routing combos;
+   - MAY have incomplete pricing or catalog coverage;
+   - **Non-negotiable**: Experimental status MUST NOT weaken authentication safety, secret handling, trust/egress boundaries, semantic correctness, retry accounting, streaming invariants, or auditability.
+2. **`FIRST_CLASS`**: Officially supported production providers (NVIDIA NIM, Antigravity, Poolside, OpenRouter, Ollama Cloud, Custom Endpoint).
+   - Requires full compliance with the Provider Conformance Lab;
+   - Requires passing `cargo xtask provider-check <provider>`;
+   - Validated model and dialect profiles;
+   - Guaranteed error taxonomy mapping and AttemptLedger tracking.
+3. **`DEPRECATED`**: Providers scheduled for phase-out.
+   - Emits deprecation warnings on configuration load;
+   - Maintains migration path to Custom Endpoint or successor provider.
+
+## 28.6 Coordinated Release Versioning & Release Manifest
+
+1. **Unified Product Semantic Version**: The native executable (`gatewaymux-app`), CLI (`gatewaymux-cli`), npm distribution wrapper (`gatewaymux`), embedded Dashboard (`@gatewaymux/dashboard`), Sync Server (`@gatewaymux/sync-server`), and Windows installer share a single, unified Semantic Version (`MAJOR.MINOR.PATCH`).
+2. **Independent Protocol Revisions**: Internal subsystems maintain independent schema/protocol revision numbers to allow forward/backward compatibility without forcing product version bumps:
+   - Sync wire protocol (`sync_protocol_version`);
+   - Configuration schema (`schema_version`);
+   - Control plane API (`control_api_version`);
+   - Compatibility Corpus revision (`corpus_revision`).
+3. **Release Manifest**: Every official build produces a machine-readable release manifest containing:
+   - Product version and build timestamp;
+   - Git commit SHA and tree hash;
+   - Protocol/schema revisions;
+   - Artifact filenames, SHA-256 checksums, and Authenticode signatures;
+   - SBOM references and build environment attestations.
+
+## 28.7 GitHub Governance and CI Enforcement
+
+1. **Branch Protection**: The `main` branch is protected. Direct pushes, force pushes, and branch deletions are strictly prohibited.
+2. **Merge Policy**: Squash merging into `main` is canonical. Standard merge commits and rebase merges are disabled. Merged branches are automatically deleted.
+3. **Ownership**: Repository ownership is unified under `@ArchdukeViel` via root `CODEOWNERS`.
+4. **Owner Approval Gate**: Pull requests authored by `@ArchdukeViel` are mergeable once required status checks pass. Pull requests authored by external contributors require an approved review from `@ArchdukeViel`. This is enforced via an isolated metadata-only status check workflow.
+5. **Tooling Integration**: GitHub Actions workflows invoke `cargo xtask` commands rather than duplicating validation logic in YAML scripts.
+
+# 29. Future Considerations
 
 The following are intentionally outside the v1.0 acceptance boundary unless promoted by a later decision:
 
@@ -5619,6 +5758,17 @@ The following decisions are normative for v1.0.0.
 - Post-update health/compatibility suite with automatic rollback.
 - Explicit versioned config migrations with backup/validation.
 - v1.0 requires both Core and Codex Bridge to meet production acceptance criteria.
+
+## Repository & Engineering Governance
+
+- Authority hierarchy: Security Requirements > GatewayMux PRD > Accepted ADRs > AGENTS.md > Scoped Rules > Issues > Code.
+- Rust multi-crate workspace enforcing directional dependencies: gatewaymux-app -> server/cli/codex-bridge/sync -> routing/providers/protocols -> core.
+- Core is strictly OS-neutral; Codex Bridge is Windows-specific and direct-calls Core.
+- Strict four artifact classes: SOURCE, GENERATED, FIXTURE, EPHEMERAL with root hygiene allowlist enforced by `xtask repo-check`.
+- R0–R4 change-risk classification model with path-derived minimums enforced in CI.
+- Provider lifecycle: EXPERIMENTAL -> FIRST_CLASS -> DEPRECATED. Experimental status must never compromise security, trust, or correctness.
+- Coordinated release versioning across binary, npm, dashboard, and sync server, with independent protocol/schema revisions.
+- GitHub branch protection with squash-merge only, automated Dependabot grouped updates, and metadata-only owner approval gate for single-owner workflow.
 
 ---
 
