@@ -23,27 +23,19 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           echo "PR Author: $PR_AUTHOR"
-          if [ "$PR_AUTHOR" = "ArchdukeViel" ]; then
+          AUTHOR_LOWER=$(echo "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
+          if [ "$AUTHOR_LOWER" = "archdukeviel" ]; then
             echo "Author is repository owner (@ArchdukeViel). Approval gate passed automatically."
             exit 0
           fi
 
           echo "External contribution detected. Checking for owner approval from @ArchdukeViel..."
-          REVIEWS=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '.[] | select(.user.login == "ArchdukeViel") | .state')
+          LATEST_STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select((.user.login | ascii_downcase) == "archdukeviel")] | last | .state')
 
-          APPROVED=false
-          for STATE in $REVIEWS; do
-            if [ "$STATE" = "APPROVED" ]; then
-              APPROVED=true
-            elif [ "$STATE" = "CHANGES_REQUESTED" ] || [ "$STATE" = "DISMISSED" ]; then
-              APPROVED=false
-            fi
-          done
-
-          if [ "$APPROVED" = "true" ]; then
+          if [ "$LATEST_STATE" = "APPROVED" ]; then
             echo "Found valid APPROVED review from @ArchdukeViel. Approval gate passed."
             exit 0
           else
-            echo "::error::Pull requests from external contributors require explicit approval from @ArchdukeViel."
+            echo "::error::Pull requests from external contributors require explicit approval from @ArchdukeViel. Current owner review state: ${LATEST_STATE:-none}"
             exit 1
           fi

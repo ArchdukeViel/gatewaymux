@@ -22,8 +22,8 @@ yarn-error.log*
 
 # Environment, secrets, and credentials
 .env
+.env*
 .env.*
-!.env.example
 *.pem
 *.key
 id_rsa
@@ -57,6 +57,9 @@ coverage/
 *.lcov
 debug-dumps/
 .scratch/
+screenshots/
+reports/
+*.log
 
 # Agent working artifacts (must not pollute repository)
 .agents/scratch/

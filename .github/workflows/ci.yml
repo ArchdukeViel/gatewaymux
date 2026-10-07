@@ -45,7 +45,15 @@ jobs:
         uses: dtolnay/rust-toolchain@e0d165f49c572b84ebba0eb842bfeb609ebf10fc # stable
 
       - name: Evaluate change-risk class
-        run: cargo xtask risk-check
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ($env:BASE_REF) {
+            cargo xtask risk-check --base "origin/$env:BASE_REF"
+          } else {
+            cargo xtask risk-check
+          }
 
   rust-validation:
     name: Rust Check, Clippy & Tests

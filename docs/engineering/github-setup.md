@@ -46,9 +46,18 @@ Under native GitHub Branch Protection, configuring `required_approving_review_co
    - If PR author is an external contributor: status check queries PR reviews via GitHub API and requires an `APPROVED` review from `@ArchdukeViel`.
 3. This achieves exact single-owner security without unmergeable deadlocks.
 
+## 3. Security Scanning & Dependency Review
+
+Configured in `.github/workflows/security.yml`:
+- **Secret & Pattern Scan**: Rejects accidental credential leaks (`ghp_*`, `sk-*`, bearer tokens).
+- **Cargo Deny**: Validates Cargo dependencies against advisories, bans, and licenses via `EmbarkStudios/cargo-deny-action` using `deny.toml`.
+- **Dependency Review**: Runs `actions/dependency-review-action` on PRs to prevent vulnerable dependency introduction.
+
 ## 4. Dependabot
 
 Configured in `.github/dependabot.yml`:
-- Package ecosystems: `cargo`, `npm`, `github-actions`.
-- Update interval: Weekly.
-- Grouping: Grouped updates enabled across each ecosystem to prevent PR spam.
+- **Cargo**: Grouped updates for Rust workspace dependencies (`cargo-dependencies`).
+- **Dashboard npm**: Grouped updates for control plane UI workspace (`dashboard-workspace-dependencies`).
+- **Packaging npm**: Grouped updates for distribution tooling (`npm-distribution-tooling`).
+- **GitHub Actions**: Grouped updates for workflow actions (`github-actions`).
+- **Interval**: Weekly schedule with open PR caps to avoid noise.
