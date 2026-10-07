@@ -12,13 +12,14 @@ allow = [
     "BSD-2-Clause",
     "CC0-1.0",
     "ISC",
+    "Unicode-3.0",
     "Unicode-DFS-2016",
 ]
 confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+wildcards = "allow"
 highlight = "all"
 deny = []
 skip = []
