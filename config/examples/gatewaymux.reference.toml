@@ -1,0 +1,82 @@
+# GatewayMux Reference Configuration (PRD Appendix C)
+schema_version = 1
+
+[server.data_plane]
+bind = "127.0.0.1"
+port = 20130
+allow_insecure_lan = false
+
+[server.control_plane]
+bind = "127.0.0.1"
+port = 20131
+auth_mode = "bootstrap_token"
+
+[logging]
+level = "info"
+format = "json"
+log_analytics_bodies = false
+
+# ---------- Providers ----------
+
+[[providers.nim]]
+id = "nim-cloud"
+label = "NVIDIA NIM Cloud"
+base_url = "https://integrate.api.nvidia.com/v1"
+accounts = ["nim-primary"]
+
+[[accounts]]
+id = "nim-primary"
+provider = "nim-cloud"
+secret_ref = "secret://gatewaymux/nim-primary"
+
+# ---------- Logical Models ----------
+
+[[models]]
+id = "claude-sonnet-tier"
+label = "Sonnet-grade coding model"
+required_quality = "S"
+
+[[models]]
+id = "fast-chat"
+label = "Low latency chat"
+required_quality = "B"
+
+# ---------- Combos ----------
+
+[[combos]]
+id = "worker"
+label = "Autonomous Coding Worker"
+chain = [
+    { model = "claude-sonnet-tier", cost_policy = "prefer_free" },
+    { model = "fast-chat", cost_policy = "normal" }
+]
+
+# ---------- Cloud Sync ----------
+
+[sync]
+enabled = false
+backend = "reference"
+server_url = "https://sync.example.invalid"
+profile = "personal"
+secret_vault = false
+strict_distributed_quota = true
+
+[device]
+name = "desktop-main"
+
+# ---------- Retry ----------
+
+[retry]
+max_generation_attempts = 4
+ambiguous_acceptance = "idempotent_only"
+
+# ---------- Codex Bridge ----------
+
+[codex_bridge]
+enabled = true
+unknown_version_behavior = "official_passthrough"
+auto_reenable_after_full_compatibility_pass = true
+hidden_desktop_auto_terminate = false
+
+[codex_bridge.roles.worker]
+combo = "worker"
