@@ -1,0 +1,19 @@
+{
+  "name": "gatewaymux",
+  "version": "0.1.0",
+  "description": "GatewayMux Windows binary distribution wrapper (pre-implementation scaffold)",
+  "bin": {
+    "gatewaymux": "bin/gatewaymux.js"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "scripts": {
+    "check": "node -e \"console.log('gatewaymux packaging/npm: valid distribution scaffold')\"",
+    "test": "node -e \"console.log('gatewaymux packaging/npm: 0 tests (pre-implementation)')\""
+  },
+  "license": "MIT"
+}

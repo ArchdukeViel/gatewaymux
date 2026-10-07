@@ -1,0 +1,37 @@
+[workspace]
+members = [
+    "crates/gatewaymux-core",
+    "crates/gatewaymux-protocols",
+    "crates/gatewaymux-providers",
+    "crates/gatewaymux-routing",
+    "crates/gatewaymux-sync",
+    "crates/gatewaymux-codex-bridge",
+    "crates/gatewaymux-server",
+    "crates/gatewaymux-cli",
+    "crates/gatewaymux-app",
+    "crates/xtask",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["ArchdukeViel"]
+license = "MIT"
+repository = "https://github.com/ArchdukeViel/gatewaymux"
+
+[workspace.dependencies]
+# Internal workspace crates
+gatewaymux-core = { path = "crates/gatewaymux-core" }
+gatewaymux-protocols = { path = "crates/gatewaymux-protocols" }
+gatewaymux-providers = { path = "crates/gatewaymux-providers" }
+gatewaymux-routing = { path = "crates/gatewaymux-routing" }
+gatewaymux-sync = { path = "crates/gatewaymux-sync" }
+gatewaymux-codex-bridge = { path = "crates/gatewaymux-codex-bridge" }
+gatewaymux-server = { path = "crates/gatewaymux-server" }
+gatewaymux-cli = { path = "crates/gatewaymux-cli" }
+gatewaymux-app = { path = "crates/gatewaymux-app" }
+
+# Shared dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

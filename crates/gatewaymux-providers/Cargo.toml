@@ -1,0 +1,12 @@
+[package]
+name = "gatewaymux-providers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux provider adapters and credential protocols"
+
+[dependencies]
+gatewaymux-core = { workspace = true }
+gatewaymux-protocols = { workspace = true }

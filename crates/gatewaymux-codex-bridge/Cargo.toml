@@ -1,0 +1,12 @@
+[package]
+name = "gatewaymux-codex-bridge"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux Codex Bridge child-subagent interception"
+
+[dependencies]
+gatewaymux-core = { workspace = true }
+# Codex Bridge must not reach directly into provider implementation internals.

@@ -1,0 +1,11 @@
+[package]
+name = "gatewaymux-sync"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux Cloud State Sync and distributed coordination"
+
+[dependencies]
+gatewaymux-core = { workspace = true }

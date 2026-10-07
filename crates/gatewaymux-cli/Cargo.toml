@@ -1,0 +1,17 @@
+[package]
+name = "gatewaymux-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux command-line administrative interface"
+
+[dependencies]
+gatewaymux-core = { workspace = true }
+gatewaymux-protocols = { workspace = true }
+gatewaymux-providers = { workspace = true }
+gatewaymux-routing = { workspace = true }
+gatewaymux-server = { workspace = true }
+gatewaymux-sync = { workspace = true }
+gatewaymux-codex-bridge = { workspace = true }

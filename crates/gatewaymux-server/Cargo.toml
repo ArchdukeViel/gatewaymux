@@ -1,0 +1,14 @@
+[package]
+name = "gatewaymux-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux HTTP data plane and control plane listeners"
+
+[dependencies]
+gatewaymux-core = { workspace = true }
+gatewaymux-protocols = { workspace = true }
+gatewaymux-providers = { workspace = true }
+gatewaymux-routing = { workspace = true }

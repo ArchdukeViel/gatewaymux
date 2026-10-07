@@ -1,0 +1,11 @@
+{
+  "name": "@gatewaymux/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GatewayMux Control Plane Dashboard (pre-implementation scaffold)",
+  "scripts": {
+    "check": "node -e \"console.log('@gatewaymux/dashboard: valid workspace scaffold')\"",
+    "test": "node -e \"console.log('@gatewaymux/dashboard: 0 tests (pre-implementation)')\""
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,13 @@
+[package]
+name = "gatewaymux-routing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux routing engine, combo fallback, and quota management"
+
+[dependencies]
+gatewaymux-core = { workspace = true }
+gatewaymux-protocols = { workspace = true }
+gatewaymux-providers = { workspace = true }

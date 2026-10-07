@@ -1,0 +1,16 @@
+{
+  "name": "gatewaymux-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GatewayMux monorepo workspace for dashboard, sync-server, and distribution packaging",
+  "workspaces": [
+    "dashboard",
+    "sync-server",
+    "packaging/npm"
+  ],
+  "scripts": {
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "license": "MIT"
+}

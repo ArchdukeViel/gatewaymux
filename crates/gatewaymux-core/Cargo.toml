@@ -1,0 +1,12 @@
+[package]
+name = "gatewaymux-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GatewayMux core domain model, canonical IR, and security contracts"
+
+[dependencies]
+# Core is strictly OS-neutral and provider-agnostic.
+# Core must not depend on any internal workspace crates or Windows APIs.
