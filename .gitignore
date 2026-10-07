@@ -1,0 +1,42 @@
+# Binaries and build artifacts
+bin/
+dist/
+build/
+out/
+target/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Dependencies
+node_modules/
+vendor/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.pfx
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and databases
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Temporary and cache
+tmp/
+temp/
+.cache/
