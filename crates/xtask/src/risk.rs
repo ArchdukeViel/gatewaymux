@@ -1,12 +1,13 @@
 //! Change-risk classification and PR risk-declaration enforcement.
 //!
-//! Every human- or agent-authored pull request MUST declare an R0-R4 risk
-//! class; CI rejects missing declarations and under-declarations. Trusted
-//! GitHub Dependabot pull requests are exempt from manual declaration and
-//! use a path-derived risk class automatically. Dependabot identity is
-//! accepted only from CI-provided event metadata (e.g. the `PR_AUTHOR`
-//! environment variable set from the `pull_request` event payload), never
-//! from pull request body text.
+//! Every human- or agent-authored pull request MUST declare EXACTLY ONE
+//! R0-R4 risk class; CI rejects missing, ambiguous (multiple), and
+//! under-declarations. Trusted GitHub Dependabot pull requests are
+//! exempt from manual declaration and use a path-derived risk class
+//! automatically. Dependabot identity is accepted only from
+//! CI-provided event metadata (e.g. the `PR_AUTHOR` environment
+//! variable set from the `pull_request` event payload), never from
+//! pull request body text.
 
 use std::env;
 use std::path::Path;
@@ -137,23 +138,59 @@ pub fn is_trusted_dependabot(actor: &str) -> bool {
     actor.trim().eq_ignore_ascii_case(TRUSTED_DEPENDABOT_ACTOR)
 }
 
-/// Parse the declared risk class out of a pull request body that follows
-/// the PR template checkbox format.
-pub fn extract_declared_risk_from_body(body: &str) -> Option<RiskClass> {
+/// The risk-declaration outcome parsed from a pull request body that
+/// follows the PR template checkbox format.
+///
+/// A checked checkbox line contributes a selection for each tier whose
+/// BOLD label (`**Rn**`, case-insensitive) appears on the line. Only
+/// the bold tier labels of the PR template's `Declared Risk Class`
+/// section match this form, so unrelated occurrences of `R0`..`R4` in
+/// prose (or in other checkbox lists) never become declarations.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RiskDeclaration {
+    /// No checked box carries a bold tier label.
+    Undeclared,
+    /// Exactly one tier was selected across all checked boxes.
+    Single(RiskClass),
+    /// Two or more tiers were selected across checked boxes; the
+    /// declaration is ambiguous and fails risk governance.
+    Ambiguous(Vec<RiskClass>),
+}
+
+/// Parse the risk-declaration outcome out of a pull request body that
+/// follows the PR template checkbox format.
+///
+/// Policy: zero selected boxes means no declaration; exactly one
+/// selected box is the declaration; two or more selected boxes are
+/// ambiguous and rejected. The first checked box never silently wins.
+pub fn parse_risk_declaration(body: &str) -> RiskDeclaration {
+    let mut selected: Vec<RiskClass> = Vec::new();
+
     for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
-            for r in ["R4", "R3", "R2", "R1", "R0"] {
-                if trimmed.contains(&format!("**{r}**"))
-                    || trimmed.contains(&format!("**{r}:"))
-                    || trimmed.contains(r)
-                {
-                    return RiskClass::parse_opt(r);
-                }
+        let trimmed = line.trim_start();
+        let lower = trimmed.to_lowercase();
+        if !lower.starts_with("- [x]") {
+            continue;
+        }
+        for tier in [
+            RiskClass::R0,
+            RiskClass::R1,
+            RiskClass::R2,
+            RiskClass::R3,
+            RiskClass::R4,
+        ] {
+            let marker = format!("**{}**", tier.as_str().to_lowercase());
+            if lower.contains(&marker) {
+                selected.push(tier);
             }
         }
     }
-    None
+
+    match selected.len() {
+        0 => RiskDeclaration::Undeclared,
+        1 => RiskDeclaration::Single(selected[0]),
+        _ => RiskDeclaration::Ambiguous(selected),
+    }
 }
 
 /// The outcome of evaluating a change set against declared risk and the
@@ -178,12 +215,14 @@ pub enum RiskDecision {
 /// - Trusted Dependabot PRs (actor identity supplied by CI event metadata,
 ///   never PR text): declaration is not required; the path-derived minimum
 ///   is authoritative and must be derivable from a non-empty change set.
-/// - Human/agent PRs: a declaration is mandatory and must be at least the
-///   path-derived minimum.
+/// - Human/agent PRs: EXACTLY ONE declaration is mandatory. Zero selected
+///   tiers, multiple selected tiers, or a declaration lower than the
+///   path-derived minimum all fail.
 /// - Non-PR contexts (local runs, push events): a declaration is optional
-///   and informational, but an explicit under-declaration still fails.
+///   and informational, but an explicit under-declaration or an ambiguous
+///   (multiple) declaration still fails.
 pub fn evaluate_risk_decision(
-    declared: Option<RiskClass>,
+    declaration: RiskDeclaration,
     modified_paths: &[String],
     pr_actor: Option<&str>,
 ) -> RiskDecision {
@@ -204,40 +243,58 @@ pub fn evaluate_risk_decision(
             };
         }
 
-        return match declared {
-            Some(d) if d >= derived => RiskDecision::Pass {
-                declared,
+        return match declaration {
+            RiskDeclaration::Single(d) if d >= derived => RiskDecision::Pass {
+                declared: Some(d),
                 derived,
                 dependabot_exempt: false,
             },
-            Some(d) => RiskDecision::Fail(format!(
+            RiskDeclaration::Single(d) => RiskDecision::Fail(format!(
                 "Declared risk class {} is lower than the path-derived minimum {}. Contributors may elevate risk, but never lower it.",
                 d.as_str(),
                 derived.as_str()
             )),
-            None => RiskDecision::Fail(format!(
-                "No declared risk class found. Every human- or agent-authored pull request MUST declare an R0-R4 risk class in the PR template; the path-derived minimum for this change set is {}.",
+            RiskDeclaration::Undeclared => RiskDecision::Fail(format!(
+                "No declared risk class found. Every human- or agent-authored pull request MUST declare exactly one R0-R4 risk class in the PR template; the path-derived minimum for this change set is {}.",
+                derived.as_str()
+            )),
+            RiskDeclaration::Ambiguous(tiers) => RiskDecision::Fail(format!(
+                "Multiple risk classes declared ({}). Exactly one R0-R4 declaration is required: zero or multiple selected declarations both fail risk classification. The path-derived minimum for this change set is {}.",
+                tiers
+                    .iter()
+                    .map(|t| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 derived.as_str()
             )),
         };
     }
 
-    match declared {
-        Some(d) if d >= derived => RiskDecision::Pass {
-            declared,
+    match declaration {
+        RiskDeclaration::Single(d) if d >= derived => RiskDecision::Pass {
+            declared: Some(d),
             derived,
             dependabot_exempt: false,
         },
-        Some(d) => RiskDecision::Fail(format!(
+        RiskDeclaration::Single(d) => RiskDecision::Fail(format!(
             "Declared risk class {} is lower than the path-derived minimum {}. Contributors may elevate risk, but never lower it.",
             d.as_str(),
             derived.as_str()
         )),
-        None => RiskDecision::Pass {
+        RiskDeclaration::Undeclared => RiskDecision::Pass {
             declared: None,
             derived,
             dependabot_exempt: false,
         },
+        RiskDeclaration::Ambiguous(tiers) => RiskDecision::Fail(format!(
+            "Multiple risk classes declared ({}). Exactly one R0-R4 declaration is required: zero or multiple selected declarations both fail risk classification. The path-derived minimum for this change set is {}.",
+            tiers
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            derived.as_str()
+        )),
     }
 }
 
@@ -310,13 +367,15 @@ pub fn get_modified_paths(root: &Path, base: Option<&str>) -> Vec<String> {
 pub fn cmd_risk_check(args: &[String], root: &Path) -> Result<(), String> {
     println!("=== Running Risk Classification Check ===");
 
-    let mut declared_risk: Option<RiskClass> = None;
+    let mut declaration = RiskDeclaration::Undeclared;
     let mut base_ref: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
         if args[i] == "--risk" && i + 1 < args.len() {
-            declared_risk = RiskClass::parse_opt(&args[i + 1]);
+            if let Some(r) = RiskClass::parse_opt(&args[i + 1]) {
+                declaration = RiskDeclaration::Single(r);
+            }
             i += 2;
         } else if args[i] == "--base" && i + 1 < args.len() {
             base_ref = Some(args[i + 1].clone());
@@ -327,11 +386,16 @@ pub fn cmd_risk_check(args: &[String], root: &Path) -> Result<(), String> {
     }
 
     // If not supplied via CLI flag, check environment variables
-    if declared_risk.is_none() {
+    if matches!(declaration, RiskDeclaration::Undeclared) {
         if let Ok(env_risk) = env::var("DECLARED_RISK") {
-            declared_risk = RiskClass::parse_opt(&env_risk);
-        } else if let Ok(pr_body) = env::var("PR_BODY") {
-            declared_risk = extract_declared_risk_from_body(&pr_body);
+            if let Some(r) = RiskClass::parse_opt(&env_risk) {
+                declaration = RiskDeclaration::Single(r);
+            }
+        }
+    }
+    if matches!(declaration, RiskDeclaration::Undeclared) {
+        if let Ok(pr_body) = env::var("PR_BODY") {
+            declaration = parse_risk_declaration(&pr_body);
         }
     }
 
@@ -350,23 +414,32 @@ pub fn cmd_risk_check(args: &[String], root: &Path) -> Result<(), String> {
         println!("  - {p} -> {}", path_to_risk(p).as_str());
     }
     println!("Path-derived minimum risk class: {}", derived.as_str());
-    match (&declared_risk, &pr_actor) {
-        (Some(d), _) => println!("Declared risk class:             {}", d.as_str()),
-        (None, Some(a)) => {
-            if is_trusted_dependabot(a) {
+    match &declaration {
+        RiskDeclaration::Single(d) => println!("Declared risk class:             {}", d.as_str()),
+        RiskDeclaration::Undeclared => match &pr_actor {
+            Some(a) if is_trusted_dependabot(a) => {
                 println!(
                     "Declared risk class:             (none; trusted Dependabot exemption applies)"
                 );
-            } else {
+            }
+            Some(a) => {
                 println!(
                     "Declared risk class:             (none; PR actor '{a}' requires declaration)"
                 );
             }
-        }
-        (None, None) => println!("Declared risk class:             (none; non-PR context)"),
+            None => println!("Declared risk class:             (none; non-PR context)"),
+        },
+        RiskDeclaration::Ambiguous(tiers) => println!(
+            "Declared risk class:             AMBIGUOUS ({})",
+            tiers
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 
-    let decision = evaluate_risk_decision(declared_risk, &modified_paths, pr_actor.as_deref());
+    let decision = evaluate_risk_decision(declaration, &modified_paths, pr_actor.as_deref());
 
     match decision {
         RiskDecision::Pass {
@@ -522,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_declared_risk() {
+    fn test_parse_risk_declaration_single_selection() {
         let body = r#"
 ## Summary
 Some change
@@ -534,18 +607,184 @@ Some change
 - [ ] **R3**: Routing
 - [ ] **R4**: Security
 "#;
-        assert_eq!(extract_declared_risk_from_body(body), Some(RiskClass::R2));
+        assert_eq!(
+            parse_risk_declaration(body),
+            RiskDeclaration::Single(RiskClass::R2)
+        );
 
         let body_caps = r#"
 - [X] **R4**: Critical Trust
 "#;
         assert_eq!(
-            extract_declared_risk_from_body(body_caps),
-            Some(RiskClass::R4)
+            parse_risk_declaration(body_caps),
+            RiskDeclaration::Single(RiskClass::R4)
+        );
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_one_r0_passes_for_docs_paths() {
+        let body = "- [x] **R0**: Docs / comments / non-runtime fixtures";
+        assert_eq!(
+            parse_risk_declaration(body),
+            RiskDeclaration::Single(RiskClass::R0)
+        );
+        let decision = evaluate_risk_decision(
+            parse_risk_declaration(body),
+            &["docs/engineering/git-workflow.md".to_string()],
+            Some("contributor"),
+        );
+        assert_eq!(
+            decision,
+            RiskDecision::Pass {
+                declared: Some(RiskClass::R0),
+                derived: RiskClass::R0,
+                dependabot_exempt: false
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_lowercase_and_format_edges() {
+        // Lowercase bold tier label.
+        assert_eq!(
+            parse_risk_declaration("- [x] **r3**: routing change"),
+            RiskDeclaration::Single(RiskClass::R3)
+        );
+        // Uppercase checkbox marker.
+        assert_eq!(
+            parse_risk_declaration("- [X] **r1**: isolated"),
+            RiskDeclaration::Single(RiskClass::R1)
+        );
+        // Indented checkbox lines still parse.
+        assert_eq!(
+            parse_risk_declaration("   - [x] **R2**: provider"),
+            RiskDeclaration::Single(RiskClass::R2)
+        );
+        // Unchecked boxes never declare anything.
+        assert_eq!(
+            parse_risk_declaration("- [ ] **R4**\n- [ ] **R1**"),
+            RiskDeclaration::Undeclared
+        );
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_prose_does_not_become_declaration() {
+        // Random body prose containing bare tier tokens: no checkbox, no
+        // bold marker -> never a declaration.
+        let prose = r#"
+## Summary
+This fixes the R4 boundary issue. We considered R3 and even R0 paths.
+The `.github/workflows/**` area is R4 by policy.
+"#;
+        assert_eq!(parse_risk_declaration(prose), RiskDeclaration::Undeclared);
+        let decision = evaluate_risk_decision(
+            parse_risk_declaration(prose),
+            &["docs/README.md".to_string()],
+            Some("contributor"),
+        );
+        assert!(matches!(decision, RiskDecision::Fail(_)));
+        if let RiskDecision::Fail(reason) = decision {
+            assert!(
+                reason.contains("exactly one"),
+                "failure must explain the exactly-one rule: {reason}"
+            );
+        }
+
+        // A checked box whose prose merely mentions a tier (not bold)
+        // is also not a declaration: other template checkbox lists
+        // (e.g. Affected Contracts) may legitimately mention R4.
+        let checked_prose = r#"
+## Affected Contracts & Areas
+- [x] `.github/workflows/**` (R4 supply-chain boundary)
+"#;
+        assert_eq!(
+            parse_risk_declaration(checked_prose),
+            RiskDeclaration::Undeclared
         );
 
-        let no_declaration = "No checkboxes here.";
-        assert_eq!(extract_declared_risk_from_body(no_declaration), None);
+        // No checkboxes at all.
+        assert_eq!(
+            parse_risk_declaration("No checkboxes here."),
+            RiskDeclaration::Undeclared
+        );
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_two_selected_boxes_is_ambiguous() {
+        let body = r#"
+- [x] **R2**: Provider behavior
+- [x] **R4**: Security
+"#;
+        assert_eq!(
+            parse_risk_declaration(body),
+            RiskDeclaration::Ambiguous(vec![RiskClass::R2, RiskClass::R4])
+        );
+        let decision = evaluate_risk_decision(
+            parse_risk_declaration(body),
+            &workflow_paths(),
+            Some("agent"),
+        );
+        assert!(matches!(decision, RiskDecision::Fail(_)));
+        if let RiskDecision::Fail(reason) = decision {
+            assert!(
+                reason.contains("Multiple risk classes declared (R2, R4)"),
+                "failure must name the ambiguous selections: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_all_selected_boxes_is_ambiguous() {
+        let body = r#"
+- [x] **R0**: Docs
+- [x] **R1**: Isolated
+- [x] **R2**: Provider behavior
+- [x] **R3**: Routing
+- [x] **R4**: Security
+"#;
+        assert_eq!(
+            parse_risk_declaration(body),
+            RiskDeclaration::Ambiguous(vec![
+                RiskClass::R0,
+                RiskClass::R1,
+                RiskClass::R2,
+                RiskClass::R3,
+                RiskClass::R4,
+            ])
+        );
+        let decision = evaluate_risk_decision(
+            parse_risk_declaration(body),
+            &["docs/README.md".to_string()],
+            Some("contributor"),
+        );
+        assert!(matches!(decision, RiskDecision::Fail(_)));
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_multiple_bold_tiers_on_one_line_is_ambiguous() {
+        // Two bold tier labels on a single checked line count as two
+        // selections: the declaration is ambiguous, never "first wins".
+        let body = "- [x] **R2** and also **R4** somewhere else";
+        assert_eq!(
+            parse_risk_declaration(body),
+            RiskDeclaration::Ambiguous(vec![RiskClass::R2, RiskClass::R4])
+        );
+    }
+
+    #[test]
+    fn test_parse_risk_declaration_first_checked_box_never_wins() {
+        // The historical defect: "first checked box wins" silently
+        // accepted multi-selected bodies. It must fail instead.
+        let body = r#"
+- [x] **R0**: Docs
+- [x] **R4**: Security
+"#;
+        let decision = evaluate_risk_decision(
+            parse_risk_declaration(body),
+            &[".github/workflows/ci.yml".to_string()],
+            Some("agent"),
+        );
+        assert!(matches!(decision, RiskDecision::Fail(_)));
     }
 
     #[test]
@@ -566,20 +805,40 @@ Some change
 
     #[test]
     fn test_human_pr_missing_declaration_fails() {
-        let decision = evaluate_risk_decision(None, &workflow_paths(), Some("some-contributor"));
+        let decision = evaluate_risk_decision(
+            RiskDeclaration::Undeclared,
+            &workflow_paths(),
+            Some("some-contributor"),
+        );
         assert!(matches!(decision, RiskDecision::Fail(_)));
         if let RiskDecision::Fail(reason) = decision {
             assert!(
-                reason.contains("MUST declare"),
-                "failure reason must explain the missing declaration: {reason}"
+                reason.contains("exactly one"),
+                "failure must explain the exactly-one declaration rule: {reason}"
             );
         }
     }
 
     #[test]
+    fn test_human_pr_multiple_declaration_fails() {
+        let decision = evaluate_risk_decision(
+            RiskDeclaration::Ambiguous(vec![RiskClass::R1, RiskClass::R4]),
+            &workflow_paths(),
+            Some("some-contributor"),
+        );
+        assert!(matches!(decision, RiskDecision::Fail(_)));
+        if let RiskDecision::Fail(reason) = decision {
+            assert!(reason.contains("Multiple risk classes declared"));
+        }
+    }
+
+    #[test]
     fn test_human_pr_under_declaration_fails() {
-        let decision =
-            evaluate_risk_decision(Some(RiskClass::R1), &workflow_paths(), Some("agent"));
+        let decision = evaluate_risk_decision(
+            RiskDeclaration::Single(RiskClass::R1),
+            &workflow_paths(),
+            Some("agent"),
+        );
         assert!(matches!(decision, RiskDecision::Fail(_)));
         if let RiskDecision::Fail(reason) = decision {
             assert!(reason.contains("lower than the path-derived minimum"));
@@ -588,8 +847,11 @@ Some change
 
     #[test]
     fn test_human_declaration_equal_or_higher_passes() {
-        let equal =
-            evaluate_risk_decision(Some(RiskClass::R4), &workflow_paths(), Some("ArchdukeViel"));
+        let equal = evaluate_risk_decision(
+            RiskDeclaration::Single(RiskClass::R4),
+            &workflow_paths(),
+            Some("ArchdukeViel"),
+        );
         assert_eq!(
             equal,
             RiskDecision::Pass {
@@ -600,7 +862,7 @@ Some change
         );
 
         let elevated = evaluate_risk_decision(
-            Some(RiskClass::R4),
+            RiskDeclaration::Single(RiskClass::R4),
             &["docs/README.md".to_string()],
             Some("ArchdukeViel"),
         );
@@ -616,7 +878,11 @@ Some change
 
     #[test]
     fn test_dependabot_exemption_requires_no_declaration() {
-        let decision = evaluate_risk_decision(None, &workflow_paths(), Some("dependabot[bot]"));
+        let decision = evaluate_risk_decision(
+            RiskDeclaration::Undeclared,
+            &workflow_paths(),
+            Some("dependabot[bot]"),
+        );
         assert_eq!(
             decision,
             RiskDecision::Pass {
@@ -633,7 +899,7 @@ Some change
         // declared value (higher or lower) never overrides the derived
         // minimum.
         let lower = evaluate_risk_decision(
-            Some(RiskClass::R0),
+            RiskDeclaration::Single(RiskClass::R0),
             &workflow_paths(),
             Some("dependabot[bot]"),
         );
@@ -646,7 +912,7 @@ Some change
         ));
 
         let higher = evaluate_risk_decision(
-            Some(RiskClass::R4),
+            RiskDeclaration::Single(RiskClass::R4),
             &workflow_paths(),
             Some("dependabot[bot]"),
         );
@@ -657,17 +923,33 @@ Some change
                 ..
             }
         ));
+
+        // Even an ambiguous body declaration never overrides the
+        // Dependabot path-derived exemption.
+        let ambiguous = evaluate_risk_decision(
+            RiskDeclaration::Ambiguous(vec![RiskClass::R0, RiskClass::R4]),
+            &workflow_paths(),
+            Some("dependabot[bot]"),
+        );
+        assert!(matches!(
+            ambiguous,
+            RiskDecision::Pass {
+                dependabot_exempt: true,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn test_dependabot_empty_change_set_fails() {
-        let decision = evaluate_risk_decision(None, &[], Some("dependabot[bot]"));
+        let decision =
+            evaluate_risk_decision(RiskDeclaration::Undeclared, &[], Some("dependabot[bot]"));
         assert!(matches!(decision, RiskDecision::Fail(_)));
     }
 
     #[test]
     fn test_non_pr_context_is_informational_without_declaration() {
-        let decision = evaluate_risk_decision(None, &workflow_paths(), None);
+        let decision = evaluate_risk_decision(RiskDeclaration::Undeclared, &workflow_paths(), None);
         assert!(matches!(
             decision,
             RiskDecision::Pass {
@@ -679,7 +961,21 @@ Some change
 
     #[test]
     fn test_non_pr_context_under_declaration_still_fails() {
-        let decision = evaluate_risk_decision(Some(RiskClass::R2), &workflow_paths(), None);
+        let decision = evaluate_risk_decision(
+            RiskDeclaration::Single(RiskClass::R2),
+            &workflow_paths(),
+            None,
+        );
+        assert!(matches!(decision, RiskDecision::Fail(_)));
+    }
+
+    #[test]
+    fn test_non_pr_context_multiple_declaration_still_fails() {
+        let decision = evaluate_risk_decision(
+            RiskDeclaration::Ambiguous(vec![RiskClass::R3, RiskClass::R4]),
+            &workflow_paths(),
+            None,
+        );
         assert!(matches!(decision, RiskDecision::Fail(_)));
     }
 
@@ -699,7 +995,8 @@ Some change
         // PR body text or a lookalike login must never grant the
         // Dependabot exemption.
         for actor in ["dependabot", "dependabot-bot", "fake[bot]", "Dependabot "] {
-            let decision = evaluate_risk_decision(None, &workflow_paths(), Some(actor));
+            let decision =
+                evaluate_risk_decision(RiskDeclaration::Undeclared, &workflow_paths(), Some(actor));
             assert!(
                 matches!(decision, RiskDecision::Fail(_)),
                 "actor '{actor}' must not receive the Dependabot exemption"

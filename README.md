@@ -1,6 +1,6 @@
 # GatewayMux
 
-> Local-first, multi-provider LLM gateway for AI coding clients, autonomous coding workflows, and native Codex child-subagent routing.
+> Local-first, multi-provider AI gateway optimized primarily for LLM and AI-coding workloads (AI coding clients, autonomous coding workflows, and native Codex child-subagent routing), while providing a canonical routing and control architecture for additional AI operation families.
 
 **Project Status**: **Pre-Implementation Architectural Baseline**. GatewayMux is currently in active pre-implementation scaffolding. Architectural boundaries, engineering governance, toolchain validation, and repository structure are established, but product features (routing engine, provider adapters, HTTP server, dashboard UI, Codex Bridge interception) have not yet been implemented.
 
@@ -30,7 +30,7 @@ flowchart LR
 
 ## Documentation & Governance
 
-- **Product Authority**: [GatewayMux PRD v1.0.0 (Rev 6)](docs/GatewayMux_PRD_v1.0.0.md)
+- **Product Authority**: [GatewayMux PRD v1.0.0 (Rev 7)](docs/GatewayMux_PRD_v1.0.0.md)
 - **Agent Constitution**: [AGENTS.md](AGENTS.md)
 - **Contribution Guide**: [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Security Policy**: [SECURITY.md](SECURITY.md)

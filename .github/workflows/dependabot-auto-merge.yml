@@ -2,27 +2,34 @@ name: Dependabot Auto-Merge Policy
 
 # Approved policy: patch/minor Dependabot pull requests MAY be squash
 # auto-merged, but ONLY after the repository owner (@ArchdukeViel) has
-# submitted a valid APPROVED review and every required status check
-# passes. Major updates are never auto-merged.
+# submitted a valid APPROVED review for the PR's CURRENT head revision
+# and every required status check passes. Major updates are never
+# auto-merged.
 #
 # Enforcement model (metadata-only, no untrusted code execution):
-# 1. This workflow runs from the BASE branch (`pull_request_target`)
-#    and NEVER checks out or executes pull request code, even though it
-#    holds write permissions. GitHub Dependabot identity is verified from
-#    the event payload (`github.event.pull_request.user.login`), never
-#    from PR title or body text.
-# 2. Major-version detection is performed against the PR file patches
-#    fetched from the GitHub REST API (Cargo.toml requirements,
-#    package.json ranges, and workflow `uses:` pins with `# vN` version
-#    comments). Anything that cannot be PROVEN non-major fails closed:
-#    no auto-merge.
-# 3. If and only if the update is proven non-major, the workflow enables
-#    GitHub-native auto-merge (squash). GitHub itself performs the merge
-#    only when the full ruleset is satisfied: all required checks pass -
-#    including the required "Owner Approval Gate", which passes only for
-#    a valid owner APPROVED review of the current head SHA. This
-#    workflow therefore never bypasses, weakens, or replaces the owner
-#    approval, and it never submits approvals of its own.
+# 1. This workflow runs from the BASE branch (`pull_request_target` /
+#    `pull_request_review`) and NEVER checks out or executes pull
+#    request code, even though it holds write permissions. GitHub
+#    Dependabot identity is verified from the GitHub event payload and
+#    re-verified through the GitHub API by `dependabot/fetch-metadata`
+#    (PR author, first-commit author, and commit signature); it is
+#    never inferred from PR title, body, or branch name.
+# 2. Update severity comes from GitHub's OFFICIAL Dependabot metadata
+#    (`dependabot/fetch-metadata` `update-type` output):
+#      - `version-update:semver-patch` -> eligible
+#      - `version-update:semver-minor`  -> eligible
+#      - `version-update:semver-major`  -> NOT eligible (manual merge)
+#      - missing/unavailable metadata   -> fail closed (manual merge)
+# 3. Auto-merge is enabled ONLY after a valid owner APPROVED review for
+#    the current head revision exists. This workflow never submits
+#    approvals of its own. If the PR changes after approval, the stale
+#    approval no longer satisfies the required "Owner Approval Gate"
+#    status check, so GitHub cannot complete the merge until the
+#    current revision is explicitly approved again (the review event
+#    then re-evaluates this policy).
+# 4. Merging itself is GitHub-native: this workflow only enables
+#    auto-merge (`gh pr merge --auto --squash`); GitHub performs the
+#    squash merge only when the full ruleset is satisfied.
 
 on:
   pull_request_target:
@@ -38,173 +45,86 @@ jobs:
   enable-auto-merge:
     name: Enable Post-Approval Auto-Merge
     runs-on: ubuntu-latest
+    # Trusted identity from GitHub event metadata: only Dependabot PRs
+    # are ever considered by this policy. fetch-metadata re-verifies the
+    # author, the first commit author, and the commit signature via the
+    # GitHub API before producing any metadata.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     steps:
-      - name: Verify Dependabot identity and non-major update, then enable auto-merge
+      - name: Verify Dependabot identity from GitHub event metadata
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          AUTHOR_LOWER=$(echo "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
+          if [ "$AUTHOR_LOWER" != "dependabot[bot]" ]; then
+            echo "::error::PR author '$PR_AUTHOR' is not GitHub Dependabot; identity verification failed."
+            exit 1
+          fi
+          echo "Trusted GitHub Dependabot PR #$PR_NUMBER detected (identity from GitHub event metadata, never from PR text)."
+
+      - name: Fetch official Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+      # The action itself fails closed when the PR is not authored by
+      # Dependabot, contains non-Dependabot commits, has an unverified
+      # commit signature, or exposes no parseable update metadata.
+
+      - name: Verify update type is patch or minor
+        id: update-type
+        env:
+          UPDATE_TYPE: ${{ steps.dependabot-metadata.outputs.update-type }}
+        run: |
+          set -euo pipefail
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch|version-update:semver-minor)
+              echo "Dependabot update type '$UPDATE_TYPE' is eligible for post-approval auto-merge."
+              echo "eligible=true" >> "$GITHUB_OUTPUT"
+              ;;
+            version-update:semver-major)
+              echo "::notice::Auto-merge NOT enabled: update type '$UPDATE_TYPE' is a major-version upgrade. Major updates always require manual owner review and merge."
+              echo "eligible=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Auto-merge NOT enabled: Dependabot update type could not be proven patch/minor (reported: '${UPDATE_TYPE:-unavailable}'). The PR fails closed to manual owner review and merge."
+              exit 1
+              ;;
+          esac
+
+      - name: Verify owner approval for the current head revision
+        id: owner-approval
+        if: steps.update-type.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-
-          # -- 1. Trusted identity from event metadata ---------------------
-          AUTHOR_LOWER=$(echo "$PR_AUTHOR" | tr '[:upper:]' '[:lower:]')
-          if [ "$AUTHOR_LOWER" != "dependabot[bot]" ]; then
-            echo "PR author '$PR_AUTHOR' is not GitHub Dependabot; the Dependabot auto-merge policy does not apply."
-            exit 0
-          fi
-          echo "Trusted GitHub Dependabot PR #$PR_NUMBER detected (identity from GitHub event metadata, never from PR text)."
-
-          # -- 2. Diff-based major-version gate (fail closed) --------------
-          cat > /tmp/detect_major.py <<'PYEOF'
-          import json
-          import re
-          import sys
-
-          files = json.load(open(sys.argv[1], encoding="utf-8"))
-
-          # Cargo.toml dependency requirement lines, both inline styles:
-          #   serde = "1.0"                  -> major in group 2
-          #   serde = { version = "1.0" }    -> major in group 3
-          # (the `version` key may be quoted or unquoted in TOML).
-          TOML_DEP = re.compile(
-              r'^[+-]\s*([A-Za-z0-9_-]+)\s*=\s*(?:"(\d+)[.^~<>|=]|\{[^}]*\bversion\b\s*=\s*"?(\d+)\.)'
-          )
-          # package.json dependency lines: "dep": "^1.2.3"
-          JSON_DEP = re.compile(r'^[+-]\s*"([^"]+)"\s*:\s*"[~^>=<\s]*?(\d+)\.')
-          # Workflow action pins: uses: owner/repo@ref  [# vX.Y.Z]
-          # (tolerates the YAML list marker between the diff sign and `uses:`).
-          USES = re.compile(r'^[+-]\s*(?:-\s*)?uses:\s*([^\s@]+)@([^\s#]+)(?:\s+#\s*v?(\d+))?')
-          # A tag-like ref must carry a 'v' prefix or a dot; a bare numeric
-          # sequence (e.g. a commit SHA) is NOT a provable version.
-          TAG_REF = re.compile(r'^v?(\d+)(\.\d+)*$')
-          # Non-dependency Cargo.toml keys that must never be mistaken for
-          # dependency version changes.
-          TOML_META_KEYS = {
-              "version", "name", "edition", "authors", "license", "repository",
-              "description", "rust-version", "workspace", "members", "resolver",
-              "path", "default-run", "publish", "metadata", "homepage",
-              "documentation", "readme", "keywords", "categories", "include",
-              "exclude", "build", "links",
-          }
-
-          old_major = {}
-          new_major = {}
-          unparseable = []
-          unclassified = []
-          manifest_files = 0
-          lock_files = 0
-
-          for entry in files:
-              name = entry.get("filename") or ""
-              patch = entry.get("patch") or ""
-              if (name == "Cargo.lock" or name.endswith("/Cargo.lock")
-                      or name == "package-lock.json" or name.endswith("/package-lock.json")
-                      or name == "npm-shrinkwrap.json" or name.endswith("/npm-shrinkwrap.json")):
-                  lock_files += 1
-                  continue
-              is_toml = name == "Cargo.toml" or name.endswith("/Cargo.toml")
-              is_pkg = name == "package.json" or name.endswith("/package.json")
-              is_workflow = name.startswith(".github/workflows/") and (
-                  name.endswith(".yml") or name.endswith(".yaml"))
-              if not (is_toml or is_pkg or is_workflow):
-                  continue
-              changed = 0
-              matched = 0
-              for line in patch.splitlines():
-                  if not line.startswith(("+", "-")) or line.startswith(("+++", "---")):
-                      continue
-                  changed += 1
-                  removed = line.startswith("-")
-                  target = old_major if removed else new_major
-                  if is_toml:
-                      m = TOML_DEP.match(line)
-                      if not m:
-                          continue
-                      dep, major = m.group(1), (m.group(2) or m.group(3))
-                      if dep.lower() in TOML_META_KEYS:
-                          continue
-                      target[(name, dep.lower())] = major
-                      matched += 1
-                  elif is_pkg:
-                      m = JSON_DEP.match(line)
-                      if not m:
-                          continue
-                      target[(name, m.group(1).lower())] = m.group(2)
-                      matched += 1
-                  else:
-                      m = USES.match(line)
-                      if not m:
-                          continue
-                      action, ref, comment_major = m.group(1), m.group(2), m.group(3)
-                      tag = TAG_REF.match(ref)
-                      if comment_major is not None:
-                          # An explicit '# vN' pin comment is authoritative
-                          # (works for both SHA-pinned and tag-pinned actions).
-                          major = comment_major
-                      elif tag is not None and (ref.startswith("v") or "." in ref):
-                          major = tag.group(1)
-                      else:
-                          unparseable.append(
-                              "%s: %s (action ref '%s' has no provable version comment or tag; fails closed)"
-                              % (name, action, ref))
-                          continue
-                      target[(name, action.lower())] = major
-                      matched += 1
-              manifest_files += 1
-              if changed > 0 and matched == 0:
-                  unclassified.append(
-                      "%s: %d changed line(s) with no recognized dependency version change"
-                      % (name, changed))
-
-          major_changes = sorted(
-              k for k in old_major.keys() & new_major.keys() if old_major[k] != new_major[k])
-          new_deps = sorted(new_major.keys() - old_major.keys())
-
-          for k in major_changes:
-              print("MAJOR_CHANGE %s: %s %s -> %s" % (k[0], k[1], old_major[k], new_major[k]))
-          for k in new_deps:
-              print("NEW_DEPENDENCY %s: %s %s" % (k[0], k[1], new_major[k]))
-          for u in unparseable:
-              print("UNPARSEABLE %s" % u)
-          for u in unclassified:
-              print("UNCLASSIFIED %s" % u)
-          print("SUMMARY manifest_files=%d lock_files=%d major=%d new=%d unparseable=%d unclassified=%d"
-                % (manifest_files, lock_files, len(major_changes), len(new_deps),
-                   len(unparseable), len(unclassified)))
-
-          if major_changes or new_deps or unparseable or unclassified:
-              print("VERDICT=deny")
-          elif manifest_files > 0:
-              print("VERDICT=allow")
-          elif lock_files > 0:
-              # Lockfile-only updates stay within the manifest's existing
-              # semver requirements and cannot cross a major version.
-              print("VERDICT=allow")
-          else:
-              print("VERDICT=deny")
-          PYEOF
-
-          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files?per_page=100" > /tmp/pr_files.json
-          DETECTION=$(python3 /tmp/detect_major.py /tmp/pr_files.json)
-          echo "$DETECTION"
-          VERDICT=$(echo "$DETECTION" | grep '^VERDICT=' | cut -d= -f2 || true)
-
-          if [ "$VERDICT" != "allow" ]; then
-            echo "::notice::Auto-merge NOT enabled for Dependabot PR #$PR_NUMBER: the update is a major-version upgrade, introduces a new dependency, or its version impact could not be proven. Manual owner review and merge is required."
-            rm -f /tmp/detect_major.py /tmp/pr_files.json
-            exit 0
-          fi
-
-          # -- 3. Enable GitHub-native auto-merge (squash) ------------------
-          # GitHub merges only when the full ruleset is satisfied, which
-          # requires the "Owner Approval Gate" check: i.e. the owner's
-          # explicit APPROVED review of the current head SHA, plus every
-          # other required check. This workflow does not approve anything.
-          if gh api -X PUT "repos/$REPO/pulls/$PR_NUMBER/auto-merge" -f merge_method=squash --silent; then
-            echo "Auto-merge (squash) enabled for Dependabot PR #$PR_NUMBER. GitHub will merge it only after the owner's APPROVED review and all required checks pass."
+          LATEST_STATE=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select((.user.login | ascii_downcase) == "archdukeviel")] | last | .state // "none"')
+          LATEST_COMMIT_ID=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select((.user.login | ascii_downcase) == "archdukeviel")] | last | .commit_id // "none"')
+          if [ "$LATEST_STATE" = "APPROVED" ] && [ "$LATEST_COMMIT_ID" = "$PR_HEAD_SHA" ]; then
+            echo "Valid APPROVED review from @ArchdukeViel exists for the current head revision ($PR_HEAD_SHA)."
+            echo "owner-approved=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Failed to enable auto-merge for Dependabot PR #$PR_NUMBER (for example, an unresolvable conflict or a changed repository setting). The PR remains a manual merge; nothing was merged or approved."
+            echo "No valid owner approval for the current head revision yet (latest owner review state: ${LATEST_STATE:-none}, commit: ${LATEST_COMMIT_ID:-none}, current head: $PR_HEAD_SHA)."
+            echo "Auto-merge will not be enabled until @ArchdukeViel explicitly approves the current PR revision."
+            echo "owner-approved=false" >> "$GITHUB_OUTPUT"
           fi
-          rm -f /tmp/detect_major.py /tmp/pr_files.json
+
+      - name: Enable GitHub-native squash auto-merge
+        if: steps.owner-approval.outputs.owner-approved == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if gh pr merge --auto --squash "$PR_URL"; then
+            echo "Auto-merge (squash) enabled. GitHub merges only after every required check passes, including the required 'Owner Approval Gate' for the current head SHA."
+          else
+            echo "::error::Failed to enable auto-merge (for example, an unresolvable conflict or a changed repository setting). Nothing was merged or approved; the PR remains a manual merge."
+            exit 1
+          fi

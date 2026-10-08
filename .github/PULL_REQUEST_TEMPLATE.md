@@ -5,9 +5,12 @@
 <!-- What problem does this solve or what requirement does this fulfill? -->
 
 ## Declared Risk Class
-<!-- Select exactly one declared risk tier. CI enforces path-derived minimums.
-     A declaration is MANDATORY for human/agent PRs (missing = FAIL).
-     Trusted Dependabot PRs are exempt: path-derived risk applies automatically. -->
+<!-- Select EXACTLY ONE declared risk tier. CI enforces path-derived minimums.
+     Zero selected tiers = FAIL. Multiple selected tiers = FAIL. Exactly one = evaluated.
+     The parser recognizes only the bold tier labels below, so tier names in prose
+     elsewhere in the body are ignored. A declaration is MANDATORY for human/agent
+     PRs (missing = FAIL). Trusted Dependabot PRs are exempt: path-derived risk
+     applies automatically. -->
 - [ ] **R0**: Docs / comments / non-runtime fixtures
 - [ ] **R1**: Isolated implementation / unit tests / CLI
 - [ ] **R2**: Provider / protocol / model-profile behavior

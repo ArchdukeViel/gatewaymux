@@ -45,3 +45,50 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+
+  # Required aggregation status: the active `main-protection` ruleset
+  # requires this single stable check name instead of tracking the
+  # individual security job names.
+  #
+  # Semantics:
+  # - A failed or cancelled applicable security job fails the gate.
+  # - A legitimately event-skipped job (for example, Dependency Review
+  #   on non-pull_request events) does NOT fail the gate; an
+  #   event-based skip is expected, while a failure is never masked.
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    needs: [secret-scan, cargo-deny, dependency-review]
+    if: ${{ always() }}
+    steps:
+      - name: Aggregate security check results
+        env:
+          SECRET_SCAN: ${{ needs.secret-scan.result }}
+          CARGO_DENY: ${{ needs.cargo-deny.result }}
+          DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          report() {
+            case "$2" in
+              success)
+                echo "  $1: PASS"
+                ;;
+              skipped)
+                echo "  $1: SKIPPED (not applicable to this event)"
+                ;;
+              *)
+                echo "::error::$1 reported result '$2'; the required Security Gate fails."
+                failed=1
+                ;;
+            esac
+          }
+          echo "Security Gate prerequisite results:"
+          report "Secret & Pattern Scan" "$SECRET_SCAN"
+          report "Cargo Deny" "$CARGO_DENY"
+          report "Dependency Review" "$DEPENDENCY_REVIEW"
+          if [ "$failed" -ne 0 ]; then
+            echo "Security Gate: FAILED"
+            exit 1
+          fi
+          echo "Security Gate: every applicable security check passed."

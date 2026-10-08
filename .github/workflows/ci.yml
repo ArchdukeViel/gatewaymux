@@ -17,10 +17,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master / v1
+      - name: Setup Rust toolchain (rust-toolchain.toml is authoritative)
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          # No `toolchain` input: the action installs exactly the
+          # channel, components, and profile declared in
+          # rust-toolchain.toml (the single compiler authority).
+          cache: false
+          build-warnings: ''
 
       - name: Verify repository root hygiene
         run: cargo xtask repo-check
@@ -43,10 +47,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master / v1
+      - name: Setup Rust toolchain (rust-toolchain.toml is authoritative)
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          # No `toolchain` input: the action installs exactly the
+          # channel, components, and profile declared in
+          # rust-toolchain.toml (the single compiler authority).
+          cache: false
+          build-warnings: ''
 
       - name: Evaluate change-risk class
         env:
@@ -67,11 +75,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master / v1
+      - name: Setup Rust toolchain (rust-toolchain.toml is authoritative)
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
-          components: rustfmt, clippy
+          # No `toolchain` input: the action installs exactly the
+          # channel, components, and profile declared in
+          # rust-toolchain.toml (the single compiler authority),
+          # including the rustfmt and clippy components.
+          cache: false
+          build-warnings: ''
 
       - name: Check Rust formatting
         run: cargo fmt --check
@@ -113,10 +125,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master / v1
+      - name: Setup Rust toolchain (rust-toolchain.toml is authoritative)
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
-          toolchain: stable
+          # No `toolchain` input: the action installs exactly the
+          # channel, components, and profile declared in
+          # rust-toolchain.toml (the single compiler authority).
+          cache: false
+          build-warnings: ''
 
       - name: Run release check
         run: cargo xtask release-check

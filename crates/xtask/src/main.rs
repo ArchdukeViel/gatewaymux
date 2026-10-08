@@ -70,7 +70,7 @@ Available Commands:
   check                                  Run full workspace validation (repo, arch, clippy, check, fmt, npm)
   test [--risk R0..R4]                   Run workspace tests with risk-level scope and test harness status
   architecture-check                     Enforce workspace directional dependency rules across all crates
-  repo-check                             Enforce strict root hygiene and required directory structure
+  repo-check                             Enforce root hygiene, structure, workflow action pins, and toolchain authority
   generate [--check]                     Regenerate-and-compare tracked generated files (--check never writes)
   compat                                 Validate Compatibility Corpus fixtures and sanitization
   provider-check <provider>              Evaluate provider conformance, lifecycle state, and checklist
@@ -247,6 +247,17 @@ fn cmd_repo_check(_args: &[String]) -> Result<(), String> {
         }
     }
 
+    // Verify CI toolchain authority: rust-toolchain.toml is the single
+    // compiler source of truth; workflows must not declare their own.
+    if let Err(err) = verify_ci_toolchain_pins(&root) {
+        violations.push(err);
+    }
+
+    // Verify workflow actions are pinned to immutable commit SHAs.
+    if let Err(err) = verify_workflow_action_pins(&root) {
+        violations.push(err);
+    }
+
     if !violations.is_empty() {
         eprintln!(
             "\nRepository hygiene violations found ({}):",
@@ -259,6 +270,157 @@ fn cmd_repo_check(_args: &[String]) -> Result<(), String> {
     }
 
     println!("[repo-check PASS] Repository root hygiene and structural layout verified.\n");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 1b. WORKFLOW TOOLCHAIN AUTHORITY & ACTION-PIN STATIC CHECKS
+// ---------------------------------------------------------------------------
+/// Parse the `channel` and `components` declared in rust-toolchain.toml,
+/// the single authoritative Rust compiler declaration.
+fn read_rust_toolchain(root: &Path) -> Result<(String, Vec<String>), String> {
+    let path = root.join("rust-toolchain.toml");
+    let content = fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "Missing or unreadable rust-toolchain.toml (the single Rust compiler authority): {e}"
+        )
+    })?;
+
+    let mut channel: Option<String> = None;
+    let mut components: Vec<String> = Vec::new();
+
+    for line in content.lines() {
+        let t = line.trim();
+        if let Some(rest) = t
+            .strip_prefix("channel")
+            .and_then(|r| r.trim_start().strip_prefix('='))
+        {
+            let value = rest.trim().trim_matches('"');
+            if !value.is_empty() {
+                channel = Some(value.to_string());
+            }
+        } else if let Some(rest) = t
+            .strip_prefix("components")
+            .and_then(|r| r.trim_start().strip_prefix('='))
+        {
+            let inner = rest.trim().trim_start_matches('[').trim_end_matches(']');
+            components = inner
+                .split(',')
+                .map(|c| c.trim().trim_matches('"').to_string())
+                .filter(|c| !c.is_empty())
+                .collect();
+        }
+    }
+
+    let channel = channel.ok_or_else(|| {
+        "rust-toolchain.toml must declare channel = \"<version>\"; it is the single authoritative Rust compiler version for CI".to_string()
+    })?;
+    Ok((channel, components))
+}
+
+/// List every GitHub Actions workflow file under `.github/workflows`.
+fn workflow_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let dir = root.join(".github").join("workflows");
+    if !dir.is_dir() {
+        return Err("Missing required repository directory: .github/workflows".to_string());
+    }
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| format!("Failed to read .github/workflows: {e}"))? {
+        let entry = entry.map_err(|e| format!("Failed to read workflow entry: {e}"))?;
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("yml") || e.eq_ignore_ascii_case("yaml"))
+                .unwrap_or(false)
+        {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// Enforce that CI never declares an independent Rust toolchain pin:
+/// `rust-toolchain.toml` is the single source of truth, so no workflow
+/// may pass a `toolchain:` input (for example `toolchain: stable`) that
+/// could drift from the repository pin. CI must install exactly the
+/// channel declared in the file. The file must also declare the
+/// rustfmt and clippy components CI requires.
+pub(crate) fn verify_ci_toolchain_pins(root: &Path) -> Result<(), String> {
+    let (channel, components) = read_rust_toolchain(root)?;
+
+    for component in ["rustfmt", "clippy"] {
+        if !components.iter().any(|c| c == component) {
+            return Err(format!(
+                "rust-toolchain.toml must declare the '{component}' component: CI requires rustfmt and clippy from the same authoritative toolchain file (channel = \"{channel}\")"
+            ));
+        }
+    }
+
+    for path in workflow_files(root)? {
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        for (idx, line) in content.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("toolchain:") {
+                return Err(format!(
+                    "{}:{}: CI workflows must not declare an independent '{}' input. rust-toolchain.toml (channel = \"{}\") is the single authoritative Rust compiler version; never create a second version constant such as 'toolchain: stable'.",
+                    path.display(),
+                    idx + 1,
+                    trimmed,
+                    channel
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Enforce immutable full-length commit SHA pinning for every action
+/// referenced from `.github/workflows/**`. Floating tags (`@v4`,
+/// `@stable`, `@master`) and unpinned references are rejected: CI
+/// workflows are part of the repository security and software
+/// supply-chain boundary.
+pub(crate) fn verify_workflow_action_pins(root: &Path) -> Result<(), String> {
+    for path in workflow_files(root)? {
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        for (idx, line) in content.lines().enumerate() {
+            let mut trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("- ") {
+                trimmed = rest.trim();
+            }
+            let Some(spec) = trimmed.strip_prefix("uses:") else {
+                continue;
+            };
+            let reference = spec.split_whitespace().next().unwrap_or("");
+            if reference.is_empty() {
+                return Err(format!(
+                    "{}:{}: 'uses:' must reference an action pinned by a full-length commit SHA; found an empty reference.",
+                    path.display(),
+                    idx + 1
+                ));
+            }
+            let Some((_, action_ref)) = reference.rsplit_once('@') else {
+                return Err(format!(
+                    "{}:{}: action '{reference}' is not pinned to a commit SHA. Pin every workflow action to an immutable full-length commit SHA (for example 'owner/repo@<40-hex-sha> # vX.Y.Z').",
+                    path.display(),
+                    idx + 1
+                ));
+            };
+            let sha_pinned =
+                action_ref.len() == 40 && action_ref.chars().all(|c| c.is_ascii_hexdigit());
+            if !sha_pinned {
+                return Err(format!(
+                    "{}:{}: action '{reference}' must be pinned to an immutable full-length commit SHA; the floating reference '{action_ref}' is prohibited.",
+                    path.display(),
+                    idx + 1
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -668,4 +830,181 @@ fn cmd_release_check(_args: &[String]) -> Result<(), String> {
 
     println!("\n[release-check PASS] Repository is release-check compliant and all coordinated manifests are synchronized.\n");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests for the workflow toolchain-authority and action-pin checks
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// A disposable test repository root under the system temp dir.
+    struct TempRepo(PathBuf);
+
+    impl TempRepo {
+        fn new() -> Self {
+            let unique = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "gatewaymux-xtask-repo-check-test-{}-{}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir_all(&dir).expect("failed to create temp dir");
+            TempRepo(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+
+        fn write(&self, relative: &str, content: &str) {
+            let p = self.0.join(relative);
+            if let Some(parent) = p.parent() {
+                fs::create_dir_all(parent).expect("failed to create parent dir");
+            }
+            fs::write(&p, content).expect("failed to write file");
+        }
+    }
+
+    impl Drop for TempRepo {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const VALID_TOOLCHAIN_FILE: &str = "[toolchain]\nchannel = \"1.98.1\"\ncomponents = [\"rustfmt\", \"clippy\"]\nprofile = \"minimal\"\n";
+
+    const SHA_PINNED_WORKFLOW: &str = "name: CI\non:\n  push:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n      - name: Setup Rust toolchain\n        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0\n";
+
+    #[test]
+    fn test_toolchain_channel_parsing() {
+        let repo = TempRepo::new();
+        repo.write("rust-toolchain.toml", VALID_TOOLCHAIN_FILE);
+        let (channel, components) =
+            read_rust_toolchain(repo.path()).expect("valid file must parse");
+        assert_eq!(channel, "1.98.1");
+        assert!(components.contains(&"rustfmt".to_string()));
+        assert!(components.contains(&"clippy".to_string()));
+    }
+
+    #[test]
+    fn test_toolchain_check_rejects_missing_channel_or_components() {
+        let repo = TempRepo::new();
+        repo.write(
+            "rust-toolchain.toml",
+            "[toolchain]\ncomponents = [\"rustfmt\"]\n",
+        );
+        let err = read_rust_toolchain(repo.path()).unwrap_err();
+        assert!(err.contains("channel"), "unexpected error: {err}");
+
+        let repo = TempRepo::new();
+        repo.write(
+            "rust-toolchain.toml",
+            "[toolchain]\nchannel = \"1.98.1\"\ncomponents = [\"rustfmt\"]\n",
+        );
+        let err = verify_ci_toolchain_pins(repo.path()).unwrap_err();
+        assert!(err.contains("clippy"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn test_toolchain_check_rejects_workflow_toolchain_input() {
+        let repo = TempRepo::new();
+        repo.write("rust-toolchain.toml", VALID_TOOLCHAIN_FILE);
+        repo.write(
+            ".github/workflows/ci.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067\n        with:\n          toolchain: stable\n",
+        );
+        let err = verify_ci_toolchain_pins(repo.path()).unwrap_err();
+        assert!(err.contains("toolchain"), "unexpected error: {err}");
+        assert!(
+            err.contains("1.98.1"),
+            "error must name the pinned channel: {err}"
+        );
+        assert!(
+            err.contains("ci.yml"),
+            "error must name the offending workflow: {err}"
+        );
+    }
+
+    #[test]
+    fn test_toolchain_check_accepts_sha_pinned_file_authoritative_workflow() {
+        let repo = TempRepo::new();
+        repo.write("rust-toolchain.toml", VALID_TOOLCHAIN_FILE);
+        repo.write(".github/workflows/ci.yml", SHA_PINNED_WORKFLOW);
+        assert!(verify_ci_toolchain_pins(repo.path()).is_ok());
+    }
+
+    #[test]
+    fn test_toolchain_check_ignores_comments_mentioning_toolchain() {
+        // Comments mentioning `toolchain` must never trip the check.
+        let repo = TempRepo::new();
+        repo.write("rust-toolchain.toml", VALID_TOOLCHAIN_FILE);
+        repo.write(
+            ".github/workflows/ci.yml",
+            "# No `toolchain` input: the action installs the file's channel.\njobs: {}\n",
+        );
+        assert!(verify_ci_toolchain_pins(repo.path()).is_ok());
+    }
+
+    #[test]
+    fn test_action_pins_accept_sha_pinned_workflows() {
+        let repo = TempRepo::new();
+        repo.write(".github/workflows/ci.yml", SHA_PINNED_WORKFLOW);
+        assert!(verify_workflow_action_pins(repo.path()).is_ok());
+    }
+
+    #[test]
+    fn test_action_pins_reject_floating_tags() {
+        for floating in [
+            "uses: actions/checkout@v4\n",
+            "uses: actions/checkout@stable\n",
+            "uses: dtolnay/rust-toolchain@master\n",
+            "uses: actions/checkout\n",
+        ] {
+            let repo = TempRepo::new();
+            repo.write(
+                ".github/workflows/ci.yml",
+                &format!("jobs:\n  build:\n    steps:\n      - {floating}"),
+            );
+            let err = verify_workflow_action_pins(repo.path()).unwrap_err();
+            assert!(
+                err.contains("full-length commit SHA"),
+                "floating ref must be rejected: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_action_pins_reject_short_shas_and_list_form() {
+        // Short (non-40-hex) refs are not immutable pins.
+        let repo = TempRepo::new();
+        repo.write(
+            ".github/workflows/ci.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: owner/repo@deadbeef\n",
+        );
+        assert!(verify_workflow_action_pins(repo.path()).is_err());
+
+        // Local composite actions are not covered by the SHA-pin rule
+        // and are rejected pending a separate governance decision.
+        let repo = TempRepo::new();
+        repo.write(
+            ".github/workflows/ci.yml",
+            "jobs:\n  build:\n    steps:\n      - uses: ./.github/actions/local\n",
+        );
+        assert!(verify_workflow_action_pins(repo.path()).is_err());
+    }
+
+    #[test]
+    fn test_action_pins_ignores_non_uses_lines_and_comments() {
+        let repo = TempRepo::new();
+        repo.write(
+            ".github/workflows/ci.yml",
+            "# see owner/repo@v4 mentioned in prose\nname: CI\nrun: |\n  echo \"uses: not-a-key\"\n",
+        );
+        assert!(verify_workflow_action_pins(repo.path()).is_ok());
+    }
 }
