@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to GatewayMux!
 
-GatewayMux is a high-reliability, local-first LLM gateway. To maintain safety, security, and architectural coherence, all contributions must adhere to the standards outlined in this guide.
+GatewayMux is a high-reliability, local-first, multi-provider AI gateway optimized primarily for LLM and AI-coding workloads. To maintain safety, security, and architectural coherence, all contributions must adhere to the standards outlined in this guide.
 
 ## Branching & Workflow
 

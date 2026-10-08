@@ -32,13 +32,15 @@ This document defines the Git lifecycle, branch management, and merge controls e
    cargo xtask test
    ```
 3. **Open Pull Request**: Use `.github/PULL_REQUEST_TEMPLATE.md`.
-4. **Declare Risk Class**: Fill out the risk classification (R0 to R4). CI will verify against path minima. Human/agent PRs without a declared risk are rejected; trusted Dependabot PRs use path-derived risk automatically.
+4. **Declare Risk Class**: Select EXACTLY ONE risk tier (R0 to R4). CI verifies against path minima: zero selected tiers, multiple selected tiers, and under-declarations all FAIL the `Risk Classification Verification` check. Trusted Dependabot PRs are exempt and use path-derived risk automatically.
 5. **CI Gating**: All checks must pass:
    - `repo-hygiene` (`cargo xtask repo-check`, `architecture-check`, `compat`, `generate --check`)
    - `rust-validation` (`cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`)
    - `npm-validation` (`npm run check`, `npm test`)
    - `risk-assessment` (`cargo xtask risk-check`)
    - `owner-approval` (metadata-only owner approval gate, required for external/bot PRs)
+   - `Security Gate` (required aggregation of the Security workflow's secret & pattern scan, cargo-deny, and dependency review)
+   - CI installs exactly the Rust toolchain declared in `rust-toolchain.toml`; workflows must not declare an independent toolchain pin.
 6. **Merge**: Once checks pass and the review/approval requirements below are satisfied, squash merge into `main`. The feature branch is automatically deleted upon merge.
 
 ## 4. Mandatory Review vs. Owner Approval
@@ -50,8 +52,8 @@ GitHub does not permit a PR author to approve their own PR. The repository there
 - Requires an actual GitHub `APPROVED` review from `@ArchdukeViel`.
 - The approval must be submitted against the PR's current head SHA; approving an outdated revision does not satisfy the gate, and a new push invalidates prior approvals.
 - All required status checks must pass, and unresolved review findings block the merge.
-- Enforced by the required metadata-only `Owner Approval Gate` status check; after a valid owner approval, previously failed gate runs are re-evaluated automatically (see `docs/engineering/github-setup.md`), so no manual workflow re-run is needed.
-- Dependabot patch/minor PRs may additionally be auto-merged (squash) once approval and all required checks pass, per the Dependabot policy in `docs/engineering/github-setup.md`. Major updates are manually merged.
+- Enforced by the required metadata-only `Owner Approval Gate` status check; after a valid owner approval for the current head SHA, previously FAILED gate runs are re-evaluated automatically (and only failed runs — never previously successful ones; see `docs/engineering/github-setup.md`), so no manual workflow re-run is needed. Dismissal of an owner approval is handled by the normal Owner Approval Gate, which re-blocks the merge.
+- Dependabot patch/minor PRs may additionally be auto-merged (squash) once the owner approves the current revision, official Dependabot metadata proves a patch/minor update type, and all required checks pass, per the Dependabot policy in `docs/engineering/github-setup.md`. Major updates are manually merged.
 
 ### 4.2 Mandatory review — every PR, including owner-authored PRs
 
